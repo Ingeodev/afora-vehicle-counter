@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "afora-vehicle-counter"
+version = "2.0.0-alpha.1"
+description = "Libreria de deteccion, tracking y conteo vehicular multi-backend (YOLO, D-Fine, RT-DETR)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Ingeodev"}
+]
+keywords = ["vehicle-counting", "video-processing", "yolo", "dfine", "object-detection"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "opencv-python-headless>=4.8.0",
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "pyyaml>=6.0",
+    "tqdm>=4.65.0",
+    "pillow>=10.0.0",
+]
+
+[project.optional-dependencies]
+yolo = [
+    "ultralytics>=8.0.0",
+]
+dfine = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "transformers>=4.30.0",
+]
+rtdetr = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "transformers>=4.30.0",
+]
+tracking = [
+    "lapx>=0.5.0",
+]
+all = [
+    "afora-vehicle-counter[yolo,dfine,rtdetr,tracking]",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-mock>=3.10.0",
+]
+
+[project.scripts]
+afora = "afora_vc.cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["afora_vc"]
+include = ["afora_vc*"]
+
+[tool.setuptools.package-data]
+"afora_vc" = ["py.typed", "config/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+markers = [
+    "slow: tests that require model downloads or GPU (skipped by default)",
+]
+addopts = "-m 'not slow'"

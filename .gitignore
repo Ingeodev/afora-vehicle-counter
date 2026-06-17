@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.coverage
+.venv/
+.idea/
+*.pt
+*.pth
+*.onnx
+yolov8s.pt
