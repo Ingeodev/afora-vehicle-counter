@@ -101,7 +101,7 @@ class BotSORTTrackerAdapter:
                 cfg.update(user_cfg)
 
         args = SimpleNamespace(**cfg)
-        self._tracker = BOTSORT(args, frame_rate=fps)
+        self._tracker = BOTSORT(args)
 
     def update(self, raw_detections: list[RawDetection], frame: np.ndarray) -> list[Detection]:
         self._frame_count += 1
