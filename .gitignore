@@ -10,3 +10,6 @@ __pycache__/
 *.onnx
 yolov8s.pt
 tests/assets/output_*/
+tests/assets/video.mp4
+tests/assets/expected/
+output/
