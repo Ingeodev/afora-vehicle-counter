@@ -218,6 +218,48 @@ class TestYOLODetectorAdapterInit:
         adapter = YOLODetectorAdapter.__new__(YOLODetectorAdapter)
         assert adapter.supports_batch is True
 
+    def test_detect_batch_count_matches_input(self, mocker):
+        from afora_vc.adapters.detectors.yolo_adapter import YOLODetectorAdapter
+
+        class MockTensor:
+            def __init__(self, data):
+                self._data = data
+            def cpu(self):
+                return self
+            def numpy(self):
+                return self._data
+
+        class MockBoxes:
+            def __init__(self):
+                self.xyxy = MockTensor(np.array([[10, 20, 100, 200]]))
+                self.cls = MockTensor(np.array([2]))
+                self.conf = MockTensor(np.array([0.9]))
+                self.id = None
+
+        class MockResult:
+            def __init__(self):
+                self.boxes = MockBoxes()
+                self.masks = None
+
+        mock_model = mocker.MagicMock()
+        mock_model.return_value = [MockResult() for _ in range(4)]
+
+        adapter = YOLODetectorAdapter.__new__(YOLODetectorAdapter)
+        adapter._model = mock_model
+        adapter._device_str = "cpu"
+        adapter._half = False
+        adapter._allowed_ids = [2, 7]
+        adapter._classes = {2: "car", 7: "truck"}
+        adapter._confidence = 0.5
+        adapter._class_thresholds = {}
+
+        frames = [np.zeros((480, 640, 3), dtype=np.uint8) for _ in range(4)]
+        results = adapter.detect_batch(frames)
+        assert len(results) == 4
+        for r in results:
+            assert len(r) == 1
+            assert r[0].class_name == "car"
+
     def test_class_names_returns_copy(self):
         from afora_vc.adapters.detectors.yolo_adapter import YOLODetectorAdapter
 

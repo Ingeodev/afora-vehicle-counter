@@ -16,6 +16,7 @@ class YOLODetectorAdapter:
         vehicle_classes: dict[int, str] | None = None,
         confidence_threshold: float = 0.5,
         class_thresholds: dict[str, float] | None = None,
+        half_precision: bool = True,
     ):
         self._device = device
         self._confidence = confidence_threshold
@@ -37,7 +38,7 @@ class YOLODetectorAdapter:
 
         self._model = YOLO(model_path)
         self._device_str = device.value
-        self._half = device != DeviceType.CPU
+        self._half = half_precision and device != DeviceType.CPU
 
     def detect(self, frame: np.ndarray) -> list[RawDetection]:
         results = self._model(

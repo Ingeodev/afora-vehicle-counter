@@ -13,10 +13,12 @@ class DFineDetectorAdapter:
         vehicle_classes: dict[int, str] | None = None,
         confidence_threshold: float = 0.5,
         class_thresholds: dict[str, float] | None = None,
+        half_precision: bool = True,
     ):
         self._device = device
         self._confidence = confidence_threshold
         self._class_thresholds = class_thresholds or {}
+        self._half_precision = half_precision
 
         self._classes = vehicle_classes or {
             1: "bicycle",
@@ -41,6 +43,8 @@ class DFineDetectorAdapter:
             import torch
             if torch.cuda.is_available():
                 self._model.to("cuda")
+                if half_precision:
+                    self._model.half()
             else:
                 device_str = "cpu"
                 self._model.to("cpu")
@@ -49,11 +53,18 @@ class DFineDetectorAdapter:
 
         self._device_str = device_str
 
+    def _to_dtype(self, inputs: dict) -> dict:
+        if getattr(self, "_half_precision", False) and self._device == DeviceType.CUDA:
+            import torch
+            return {k: v.half() if isinstance(v, torch.Tensor) and v.is_floating_point() else v for k, v in inputs.items()}
+        return inputs
+
     def detect(self, frame: np.ndarray) -> list[RawDetection]:
         from PIL import Image
 
         img = Image.fromarray(frame)
         inputs = self._processor(images=img, return_tensors="pt").to(self._device_str)
+        inputs = self._to_dtype(inputs)
 
         import torch
         with torch.no_grad():
@@ -72,6 +83,7 @@ class DFineDetectorAdapter:
 
         images = [Image.fromarray(f) for f in frames]
         inputs = self._processor(images=images, return_tensors="pt").to(self._device_str)
+        inputs = self._to_dtype(inputs)
 
         import torch
         with torch.no_grad():

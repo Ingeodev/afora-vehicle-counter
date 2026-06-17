@@ -24,6 +24,7 @@ class BatchConfig:
     adaptive: bool = True
     max_batch_size: int = 16
     target_latency_ms: float = 100.0
+    queue_maxsize: int = 4
 
 
 @dataclass
@@ -166,6 +167,7 @@ class PipelineConfig:
                 "batch_size": self.batch.batch_size,
                 "adaptive": self.batch.adaptive,
                 "max_batch_size": self.batch.max_batch_size,
+                "queue_maxsize": self.batch.queue_maxsize,
             },
         }
 

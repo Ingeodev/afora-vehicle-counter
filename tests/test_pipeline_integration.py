@@ -168,3 +168,114 @@ class TestPipelineDetectTrack:
         tracker.update.assert_called_once()
         raw_input = tracker.update.call_args[0][0]
         assert all(isinstance(d, RawDetection) for d in raw_input)
+
+
+class TestPipelineBatchMode:
+    """Verifica que batch mode acumula frames y llama a detect_batch."""
+
+    def test_batch_mode_accumulates(self, mocker):
+        detector = mocker.MagicMock()
+        detector.supports_batch = True
+        detector.detect_batch.return_value = [
+            [RawDetection(class_id=2, class_name="car", confidence=0.9,
+                          bbox=BoundingBox(10, 20, 100, 200))]
+            for _ in range(4)
+        ]
+
+        tracker = mocker.MagicMock()
+        tracker.update.return_value = [
+            Detection(track_id=1, class_id=2, class_name="car", confidence=0.9,
+                      bbox=BoundingBox(10, 20, 100, 200)),
+        ]
+
+        config = PipelineConfig()
+        config.output.save_video = False
+        config.output.save_csv = False
+        config.batch.enabled = True
+        config.batch.batch_size = 4
+
+        pipeline = Pipeline(config=config, detector=detector, tracker=tracker)
+
+        mock_video = mocker.MagicMock()
+        mock_video.fps = 30
+        mock_video.width = 640
+        mock_video.height = 480
+        mock_video.total_frames = 8
+
+        from afora_vc.domain.schemas import FrameData
+        mock_video.frames.return_value = [
+            FrameData(frame=np.zeros((480, 640, 3), dtype=np.uint8),
+                      index=i, timestamp_seconds=i / 30)
+            for i in range(8)
+        ]
+
+        mocker.patch(
+            "afora_vc.application.pipeline.VideoSource.from_path",
+            return_value=mock_video,
+        )
+
+        result = pipeline.process_video(
+            video_path="/fake/video.mp4",
+            output_folder="/tmp/test_output",
+            base_time="00:00",
+            date="2025-01-01",
+        )
+
+        assert result.frames_processed == 8
+        assert detector.detect.call_count == 0
+        assert detector.detect_batch.call_count == 2
+        assert tracker.update.call_count == 8
+
+    def test_batch_disabled_still_uses_detect(self, mocker):
+        detector = mocker.MagicMock()
+        detector.detect.return_value = [
+            RawDetection(class_id=2, class_name="car", confidence=0.9,
+                         bbox=BoundingBox(10, 20, 100, 200)),
+            RawDetection(class_id=7, class_name="truck", confidence=0.8,
+                         bbox=BoundingBox(50, 60, 150, 250)),
+        ]
+        detector.supports_batch = False
+
+        tracker = mocker.MagicMock()
+        tracker.update.return_value = [
+            Detection(track_id=1, class_id=2, class_name="car", confidence=0.9,
+                      bbox=BoundingBox(10, 20, 100, 200)),
+            Detection(track_id=2, class_id=7, class_name="truck", confidence=0.8,
+                      bbox=BoundingBox(50, 60, 150, 250)),
+        ]
+
+        config = PipelineConfig()
+        config.output.save_video = False
+        config.output.save_csv = False
+        config.batch.enabled = False
+
+        pipeline = Pipeline(config=config, detector=detector, tracker=tracker)
+
+        mock_video = mocker.MagicMock()
+        mock_video.fps = 30
+        mock_video.width = 640
+        mock_video.height = 480
+        mock_video.total_frames = 4
+
+        from afora_vc.domain.schemas import FrameData
+        mock_video.frames.return_value = [
+            FrameData(frame=np.zeros((480, 640, 3), dtype=np.uint8),
+                      index=i, timestamp_seconds=i / 30)
+            for i in range(4)
+        ]
+
+        mocker.patch(
+            "afora_vc.application.pipeline.VideoSource.from_path",
+            return_value=mock_video,
+        )
+
+        result = pipeline.process_video(
+            video_path="/fake/video.mp4",
+            output_folder="/tmp/test_output",
+            base_time="00:00",
+            date="2025-01-01",
+        )
+
+        assert result.frames_processed == 4
+        assert detector.detect.call_count == 4
+        assert tracker.update.call_count == 4

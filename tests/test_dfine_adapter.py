@@ -210,6 +210,35 @@ class TestDFineDetectorAdapterInit:
         adapter = DFineDetectorAdapter.__new__(DFineDetectorAdapter)
         assert adapter.supports_batch is True
 
+    def test_detect_batch_count_matches_input(self, mocker):
+        from afora_vc.adapters.detectors.dfine_adapter import DFineDetectorAdapter
+
+        mock_processor = mocker.MagicMock()
+        mock_model = mocker.MagicMock()
+        mock_result = {
+            "scores": mocker.MagicMock(),
+            "labels": mocker.MagicMock(),
+            "boxes": mocker.MagicMock(),
+        }
+        mock_result["scores"].__len__.return_value = 0
+        mock_result["labels"].__len__.return_value = 0
+        mock_result["boxes"].__len__.return_value = 0
+        mock_processor.post_process_object_detection.return_value = [mock_result] * 3
+
+        adapter = DFineDetectorAdapter.__new__(DFineDetectorAdapter)
+        adapter._processor = mock_processor
+        adapter._model = mock_model
+        adapter._device_str = "cpu"
+        adapter._device = DeviceType.CPU
+        adapter._confidence = 0.5
+        adapter._allowed_ids = {2, 7}
+        adapter._classes = {2: "car", 7: "truck"}
+        adapter._class_thresholds = {}
+
+        frames = [np.zeros((480, 640, 3), dtype=np.uint8) for _ in range(3)]
+        results = adapter.detect_batch(frames)
+        assert len(results) == 3
+
     def test_class_names_returns_copy(self):
         from afora_vc.adapters.detectors.dfine_adapter import DFineDetectorAdapter
 

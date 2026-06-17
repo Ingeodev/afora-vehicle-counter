@@ -31,6 +31,52 @@ class PipelineContext:
         self.detections: list[Detection] = []
 
 
+def _write_frame(
+    fd: FrameData,
+    detections: list[Detection],
+    output_queue: Queue,
+    video_writer: "AnnotatedVideoWriter",
+    out_cfg: "OutputConfig",
+    zone_manager: ZoneManager,
+    visualizer: Visualizer,
+    vehicle_tracker: VehicleTracker,
+) -> None:
+    frame = fd.frame.copy()
+    if out_cfg.draw_zones and zone_manager:
+        visualizer.draw_zones(frame, zone_manager.zones)
+    for det in detections:
+        zones_visited = zone_manager.get_zones_for_vehicle(det.track_id)
+        trajectory = vehicle_tracker.get_trajectory_array(
+            det.track_id, out_cfg.max_trajectory_points
+        )
+        visualizer.draw_detection(frame, det, zones_visited, trajectory)
+    stats = {
+        "Detecciones": zone_manager.get_log_count() if zone_manager else 0,
+        "Tiempo": format_timestamp(fd.timestamp_seconds),
+    }
+    visualizer.draw_stats(frame, stats)
+    output_queue.put(frame)
+
+
+def _update_progress(
+    frames_processed: int,
+    max_frames: int,
+    start_time: float,
+    pbar: "tqdm",
+    zone_manager: ZoneManager,
+    on_progress: Callable[[int, int, float], None] | None,
+    out_cfg: "OutputConfig",
+) -> None:
+    if on_progress and frames_processed % out_cfg.progress_interval == 0:
+        elapsed = time.time() - start_time
+        on_progress(frames_processed, max_frames, elapsed)
+    if frames_processed % 10 == 0:
+        postfix = {}
+        if zone_manager:
+            postfix["detections"] = zone_manager.get_log_count()
+        pbar.set_postfix(postfix)
+
+
 class Pipeline:
     def __init__(
         self,
@@ -151,8 +197,13 @@ class Pipeline:
                 disable=not out_cfg.verbose,
             )
 
+            # Warmup: run a dummy inference to load CUDA kernels, ONNX runtime, etc.
+            if hasattr(self.detector, "warmup"):
+                self.detector.warmup((new_height, new_width, 3))
+
             # Threaded reader
-            input_queue: Queue = Queue(maxsize=4)
+            qsize = cfg.batch.queue_maxsize
+            input_queue: Queue = Queue(maxsize=qsize)
 
             def _reader_worker():
                 try:
@@ -169,7 +220,7 @@ class Pipeline:
             writer_thread: Thread | None = None
 
             if video_writer:
-                output_queue = Queue(maxsize=4)
+                output_queue = Queue(maxsize=qsize)
 
                 def _writer_worker():
                     try:
@@ -185,73 +236,129 @@ class Pipeline:
                 writer_thread.start()
 
             # ─── Main loop ────────────────
+            batch_enabled = cfg.batch.enabled
+            batch_buffer: list[tuple[FrameData, np.ndarray, float]] = []
+
             for item in iter(input_queue.get, None):
                 fd: FrameData = item
 
                 # Preprocess
                 processed = preprocessor.process(fd.frame)
+                ts = fd.timestamp_seconds
 
-                # Detect + Track (via the separate tracker adapter and detector)
+                if batch_enabled:
+                    batch_buffer.append((fd, processed, ts))
+                    if len(batch_buffer) < cfg.batch.batch_size:
+                        continue
+
+                    # Flush buffer with detect_batch
+                    batch_frames = [b[1] for b in batch_buffer]
+                    batch_ts = [b[2] for b in batch_buffer]
+                    batch_originals = [b[0] for b in batch_buffer]
+
+                    raw_detections_batch = self.detector.detect_batch(batch_frames)
+
+                    for raw_detections, ts_orig, fd_orig, proc_frame in zip(
+                        raw_detections_batch, batch_ts, batch_originals, batch_frames
+                    ):
+                        detections = self.tracker.update(raw_detections, proc_frame)
+                        vehicle_tracker.update_batch(detections)
+
+                        if self.mask_manager.is_loaded:
+                            detections = self.mask_manager.filter_detections(detections)
+
+                        if self.zone_manager:
+                            for det in detections:
+                                exact_time = calculate_exact_time(base_time, ts_orig) or "00:00:00"
+                                self.zone_manager.check_entry(
+                                    track_id=det.track_id,
+                                    x=det.center[0],
+                                    y=det.center[1],
+                                    timestamp_seconds=ts_orig,
+                                    vehicle_type=det.class_name,
+                                    date=date,
+                                    exact_time=exact_time,
+                                )
+
+                        if video_writer and output_queue is not None:
+                            _write_frame(
+                                fd_orig, detections, output_queue,
+                                video_writer, out_cfg, self.zone_manager,
+                                self.visualizer, vehicle_tracker,
+                            )
+
+                    batch_buffer.clear()
+                    frames_processed += len(batch_frames)
+                    pbar.update(len(batch_frames))
+                    _update_progress(frames_processed, max_frames, start_time, pbar, self.zone_manager, on_progress, out_cfg)
+                    continue
+
+                # ─── Single-frame path ────────────────
                 raw_detections = self.detector.detect(processed)
                 detections = self.tracker.update(raw_detections, processed)
 
-                # Update vehicle tracker history
                 vehicle_tracker.update_batch(detections)
 
-                # Mask filter
                 if self.mask_manager.is_loaded:
                     detections = self.mask_manager.filter_detections(detections)
 
-                # Zone checking
                 if self.zone_manager:
                     for det in detections:
-                        exact_time = calculate_exact_time(base_time, fd.timestamp_seconds) or "00:00:00"
+                        exact_time = calculate_exact_time(base_time, ts) or "00:00:00"
                         self.zone_manager.check_entry(
                             track_id=det.track_id,
                             x=det.center[0],
                             y=det.center[1],
-                            timestamp_seconds=fd.timestamp_seconds,
+                            timestamp_seconds=ts,
                             vehicle_type=det.class_name,
                             date=date,
                             exact_time=exact_time,
                         )
 
-                # Visualize
                 if video_writer and output_queue is not None:
-                    # fd.frame ya viene resizeado desde VideoSource.frames()
-                    frame = fd.frame.copy()
-
-                    if out_cfg.draw_zones and self.zone_manager:
-                        self.visualizer.draw_zones(frame, self.zone_manager.zones)
-
-                    for det in detections:
-                        zones_visited = self.zone_manager.get_zones_for_vehicle(det.track_id)
-                        trajectory = vehicle_tracker.get_trajectory_array(
-                            det.track_id, out_cfg.max_trajectory_points
-                        )
-                        self.visualizer.draw_detection(frame, det, zones_visited, trajectory)
-
-                    stats = {
-                        "Detecciones": self.zone_manager.get_log_count() if self.zone_manager else 0,
-                        "Tiempo": format_timestamp(fd.timestamp_seconds),
-                    }
-                    self.visualizer.draw_stats(frame, stats)
-
-                    output_queue.put(frame)
+                    _write_frame(
+                        fd, detections, output_queue,
+                        video_writer, out_cfg, self.zone_manager,
+                        self.visualizer, vehicle_tracker,
+                    )
 
                 frames_processed += 1
-
-                if on_progress and frames_processed % out_cfg.progress_interval == 0:
-                    elapsed = time.time() - start_time
-                    on_progress(frames_processed, max_frames, elapsed)
-
-                if frames_processed % 10 == 0:
-                    postfix = {}
-                    if self.zone_manager:
-                        postfix["detections"] = self.zone_manager.get_log_count()
-                    pbar.set_postfix(postfix)
-
+                _update_progress(frames_processed, max_frames, start_time, pbar, self.zone_manager, on_progress, out_cfg)
                 pbar.update(1)
+
+            # Flush remaining batch buffer
+            if batch_enabled and batch_buffer:
+                batch_frames = [b[1] for b in batch_buffer]
+                batch_ts = [b[2] for b in batch_buffer]
+                batch_originals = [b[0] for b in batch_buffer]
+                raw_detections_batch = self.detector.detect_batch(batch_frames)
+                for raw_detections, ts_orig, fd_orig, proc_frame in zip(
+                    raw_detections_batch, batch_ts, batch_originals, batch_frames
+                ):
+                    detections = self.tracker.update(raw_detections, proc_frame)
+                    vehicle_tracker.update_batch(detections)
+                    if self.mask_manager.is_loaded:
+                        detections = self.mask_manager.filter_detections(detections)
+                    if self.zone_manager:
+                        for det in detections:
+                            exact_time = calculate_exact_time(base_time, ts_orig) or "00:00:00"
+                            self.zone_manager.check_entry(
+                                track_id=det.track_id,
+                                x=det.center[0],
+                                y=det.center[1],
+                                timestamp_seconds=ts_orig,
+                                vehicle_type=det.class_name,
+                                date=date,
+                                exact_time=exact_time,
+                            )
+                    if video_writer and output_queue is not None:
+                        _write_frame(
+                            fd_orig, detections, output_queue,
+                            video_writer, out_cfg, self.zone_manager,
+                            self.visualizer, vehicle_tracker,
+                        )
+                batch_buffer.clear()
+                frames_processed += len(batch_frames)
 
             pbar.close()
 
@@ -280,6 +387,7 @@ class Pipeline:
                 csv_path = det_path
 
             processing_time = time.time() - start_time
+            fps = frames_processed / processing_time if processing_time > 0 else 0
             detection_log = self.zone_manager.get_detection_log() if self.zone_manager else []
             zone_counts = self.zone_manager.get_zone_counts() if self.zone_manager else {}
 
@@ -287,7 +395,8 @@ class Pipeline:
                 print("\n" + "=" * 70)
                 print("✅ PROCESO COMPLETADO")
                 print("=" * 70)
-                print(f"⏱️ Tiempo: {processing_time / 60:.2f} min")
+                print(f"⏱️ Tiempo: {processing_time / 60:.2f} min ({processing_time:.1f}s)")
+                print(f"🎞️ Frames: {frames_processed} | {fps:.1f} FPS avg")
                 if output_video_path:
                     print(f"📁 Video: {output_video_path}")
                 if csv_path:

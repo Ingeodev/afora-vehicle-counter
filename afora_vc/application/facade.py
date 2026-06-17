@@ -34,6 +34,7 @@ def _build_pipeline(
             vehicle_classes=config.detector.vehicle_classes,
             confidence_threshold=config.detector.confidence_threshold,
             class_thresholds=config.detector.class_thresholds,
+            half_precision=config.detector.half_precision,
         )
     except ValueError as e:
         available = DetectorRegistry.available()
