@@ -9,3 +9,4 @@ __pycache__/
 *.pth
 *.onnx
 yolov8s.pt
+tests/assets/output_*/
