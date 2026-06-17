@@ -34,6 +34,7 @@ def main():
     p.add_argument("--deblurring", action="store_true", help="Deblurring agresivo")
     p.add_argument("--no-video", action="store_true", help="No guardar video")
     p.add_argument("--quiet", "-q", action="store_true", help="Modo silencioso")
+    p.add_argument("--output-name", type=str, help="Nombre del video de salida")
     p.add_argument("--batch-size", type=int, default=1, help="Tamano de batch")
     p.add_argument("--tracker-config", type=str, help="YAML de config del tracker")
 
@@ -58,6 +59,7 @@ def main():
     s.add_argument("--yes", "-y", action="store_true", help="Confirmar automaticamente")
     s.add_argument("--quiet", "-q", action="store_true")
     s.add_argument("--batch-size", type=int, default=1)
+    s.add_argument("--output-name", type=str, help="Nombre del video de salida")
     s.add_argument("--tracker-config", type=str)
 
     args = parser.parse_args()
@@ -101,6 +103,7 @@ def _cmd_process(args):
         quiet=args.quiet,
         backend=args.backend,
         tracker_backend=args.tracker,
+        output_name=args.output_name,
         batch_size=args.batch_size,
         tracker_config=args.tracker_config,
     )
@@ -129,6 +132,7 @@ def _cmd_scan(args):
         quiet=args.quiet,
         backend=args.backend,
         tracker_backend=args.tracker,
+        output_name=args.output_name,
         batch_size=args.batch_size,
         tracker_config=args.tracker_config,
     )

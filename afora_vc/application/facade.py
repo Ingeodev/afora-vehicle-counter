@@ -88,6 +88,7 @@ def process_video(
     backend: str = "yolo",
     tracker_backend: str = "botsort",
     batch_size: int = 1,
+    output_name: Optional[str] = None,
     tracker_config: Optional[str] = None,
 ) -> ProcessingResult:
     import os
@@ -154,6 +155,7 @@ def process_video(
         zones_path=zones,
         mask_path=mask,
         output_folder=output,
+        output_name=output_name,
         base_time=base_time,
         date=date,
         enable_deblurring=deblurring,
@@ -192,6 +194,7 @@ def process_directory(
                     "max_minutes", "strategy", "night_enhance", "model_config",
                     "deblurring", "no_video", "quiet", "backend",
                     "tracker_backend", "batch_size", "tracker_config",
+                    "output_name",
                 ]},
             )
             results.append(result)
