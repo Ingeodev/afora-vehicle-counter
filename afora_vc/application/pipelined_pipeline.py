@@ -21,6 +21,7 @@ from ..adapters.video.writer import AnnotatedVideoWriter, VideoWriterConfig
 from ..adapters.storage.local import LocalStorageReader, LocalStorageWriter
 from ..output.visualizer import Visualizer
 from ..output.csv_exporter import CSVExporter
+from ..utils.profiler import Profiler
 from ..utils.time_utils import calculate_exact_time, format_timestamp
 from .config import PipelineConfig
 from .pipeline import _write_frame, _update_progress
@@ -63,9 +64,14 @@ class PipelinedPipeline:
         on_progress: Callable[[int, int, float], None] | None = None,
         enable_deblurring: bool = False,
         enable_night_enhance: bool = False,
+        profiler: Profiler | None = None,
     ) -> ProcessingResult:
         cfg = self.config
         out_cfg = cfg.output
+
+        import os as _os
+        video_name = _os.path.basename(video_path)
+        _pf = profiler
 
         output_folder = output_folder or out_cfg.output_folder
         self.writer.makedirs(output_folder)
@@ -167,7 +173,9 @@ class PipelinedPipeline:
             def _reader_worker():
                 try:
                     for fd in video.frames(max_frames=max_frames, resize=resize, skip_rate=cfg.video.skip_rate):
+                        t = time.perf_counter()
                         processed = reader_preprocessor.process(fd.frame)
+                        if _pf: _pf.record(video_name, fd.index, "preprocess", (time.perf_counter() - t) * 1000)
                         detect_pipe.send((processed, fd))
                 finally:
                     detect_pipe.close()
@@ -187,11 +195,11 @@ class PipelinedPipeline:
                         buffer.append((processed, fd))
 
                         if not batch_enabled or len(buffer) >= batch_size:
-                            self._flush_raw(buffer, raw_pipe)
+                            self._flush_raw(buffer, raw_pipe, video_name, _pf)
                             buffer = []
 
                     if buffer:
-                        self._flush_raw(buffer, raw_pipe)
+                        self._flush_raw(buffer, raw_pipe, video_name, _pf)
                 except Exception:
                     import traceback
                     traceback.print_exc()
@@ -230,13 +238,16 @@ class PipelinedPipeline:
                         raw_detections, processed_frame, fd = item
                         ts = fd.timestamp_seconds
 
+                        t = time.perf_counter()
                         detections = self.tracker.update(raw_detections, processed_frame)
+                        if _pf: _pf.record(video_name, fd.index, "track", (time.perf_counter() - t) * 1000)
                         vehicle_tracker.update_batch(detections)
 
                         if self.mask_manager.is_loaded:
                             detections = self.mask_manager.filter_detections(detections)
 
                         if self.zone_manager:
+                            t = time.perf_counter()
                             for det in detections:
                                 exact_time = calculate_exact_time(base_time, ts) or "00:00:00"
                                 self.zone_manager.check_entry(
@@ -248,13 +259,16 @@ class PipelinedPipeline:
                                     date=date,
                                     exact_time=exact_time,
                                 )
+                            if _pf: _pf.record(video_name, fd.index, "zone_check", (time.perf_counter() - t) * 1000)
 
                         if video_writer and output_queue is not None:
+                            t = time.perf_counter()
                             _write_frame(
                                 fd, detections, output_queue,
                                 video_writer, out_cfg, self.zone_manager,
                                 self.visualizer, vehicle_tracker,
                             )
+                            if _pf: _pf.record(video_name, fd.index, "visualize", (time.perf_counter() - t) * 1000)
 
                         frames_processed += 1
                         _update_progress(frames_processed, max_frames, start_time, pbar, self.zone_manager, on_progress, out_cfg)
@@ -298,6 +312,9 @@ class PipelinedPipeline:
 
                 csv_path = det_path
 
+            if _pf:
+                _pf.save()
+
             processing_time = time.time() - start_time
             fps = frames_processed / processing_time if processing_time > 0 else 0
             detection_log = self.zone_manager.get_detection_log() if self.zone_manager else []
@@ -338,14 +355,21 @@ class PipelinedPipeline:
         self,
         buffer: list[tuple[np.ndarray, FrameData]],
         raw_pipe: QueuePipe,
+        video_name: str = "",
+        profiler: "Profiler | None" = None,
     ) -> None:
         batch_frames = [p for p, _ in buffer]
         originals = [fd for _, fd in buffer]
+        first_fi = originals[0].index if originals else -1
+        batch = len(buffer)
 
-        if len(buffer) == 1:
+        t = time.perf_counter()
+        if batch == 1:
             raw_list = [self.detector.detect(batch_frames[0])]
         else:
             raw_list = self.detector.detect_batch(batch_frames)
+        if profiler:
+            profiler.record(video_name, first_fi, "detect", (time.perf_counter() - t) * 1000, batch=batch)
 
         for raw_detections, processed_frame, fd_orig in zip(raw_list, batch_frames, originals):
             raw_pipe.send((raw_detections, processed_frame, fd_orig))

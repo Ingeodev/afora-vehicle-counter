@@ -95,6 +95,8 @@ def process_video(
     tracker_config: Optional[str] = None,
     pipeline_mode: str = "sequential",
     queue_maxsize: int = 4,
+    profile: bool = False,
+    profile_path: str | None = None,
 ) -> ProcessingResult:
     import os
 
@@ -157,6 +159,12 @@ def process_video(
                 int(k): str(v) for k, v in model_params["vehicle_classes"].items()
             }
 
+    from ..utils.profiler import Profiler
+
+    _profiler: Profiler | None = None
+    if profile:
+        _profiler = Profiler(csv_path=profile_path or f"{output}/profile.csv")
+
     pipeline = _build_pipeline(config, model, strategy)
 
     result = pipeline.process_video(
@@ -169,6 +177,7 @@ def process_video(
         date=date,
         enable_deblurring=deblurring,
         enable_night_enhance=night_enhance,
+        profiler=_profiler,
     )
 
     if not quiet:
@@ -204,6 +213,7 @@ def process_directory(
                     "deblurring", "no_video", "quiet", "backend",
                     "tracker_backend", "batch_size", "tracker_config",
                     "output_name", "pipeline_mode", "queue_maxsize",
+                    "profile", "profile_path",
                 ]},
             )
             results.append(result)

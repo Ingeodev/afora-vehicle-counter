@@ -20,6 +20,7 @@ from ..adapters.video.writer import AnnotatedVideoWriter, VideoWriterConfig
 from ..adapters.storage.local import LocalStorageReader, LocalStorageWriter
 from ..output.visualizer import Visualizer
 from ..output.csv_exporter import CSVExporter
+from ..utils.profiler import Profiler
 from ..utils.time_utils import calculate_exact_time, format_timestamp
 from .config import PipelineConfig, DetectorConfig, TrackerConfig
 
@@ -110,9 +111,14 @@ class Pipeline:
         on_progress: Callable[[int, int, float], None] | None = None,
         enable_deblurring: bool = False,
         enable_night_enhance: bool = False,
+        profiler: "Profiler | None" = None,
     ) -> ProcessingResult:
         cfg = self.config
         out_cfg = cfg.output
+
+        import os as _os
+        video_name = _os.path.basename(video_path)
+        _pf = profiler
 
         output_folder = output_folder or out_cfg.output_folder
         self.writer.makedirs(output_folder)
@@ -241,9 +247,11 @@ class Pipeline:
 
             for item in iter(input_queue.get, None):
                 fd: FrameData = item
+                fi = fd.index
 
-                # Preprocess
+                t = time.perf_counter()
                 processed = preprocessor.process(fd.frame)
+                if _pf: _pf.record(video_name, fi, "preprocess", (time.perf_counter() - t) * 1000)
                 ts = fd.timestamp_seconds
 
                 if batch_enabled:
@@ -251,23 +259,28 @@ class Pipeline:
                     if len(batch_buffer) < cfg.batch.batch_size:
                         continue
 
-                    # Flush buffer with detect_batch
                     batch_frames = [b[1] for b in batch_buffer]
                     batch_ts = [b[2] for b in batch_buffer]
                     batch_originals = [b[0] for b in batch_buffer]
+                    first_fi = batch_originals[0].index
 
+                    t = time.perf_counter()
                     raw_detections_batch = self.detector.detect_batch(batch_frames)
+                    if _pf: _pf.record(video_name, first_fi, "detect", (time.perf_counter() - t) * 1000, batch=len(batch_frames))
 
                     for raw_detections, ts_orig, fd_orig, proc_frame in zip(
                         raw_detections_batch, batch_ts, batch_originals, batch_frames
                     ):
+                        t = time.perf_counter()
                         detections = self.tracker.update(raw_detections, proc_frame)
+                        if _pf: _pf.record(video_name, fd_orig.index, "track", (time.perf_counter() - t) * 1000)
                         vehicle_tracker.update_batch(detections)
 
                         if self.mask_manager.is_loaded:
                             detections = self.mask_manager.filter_detections(detections)
 
                         if self.zone_manager:
+                            t = time.perf_counter()
                             for det in detections:
                                 exact_time = calculate_exact_time(base_time, ts_orig) or "00:00:00"
                                 self.zone_manager.check_entry(
@@ -279,13 +292,16 @@ class Pipeline:
                                     date=date,
                                     exact_time=exact_time,
                                 )
+                            if _pf: _pf.record(video_name, fd_orig.index, "zone_check", (time.perf_counter() - t) * 1000)
 
                         if video_writer and output_queue is not None:
+                            t = time.perf_counter()
                             _write_frame(
                                 fd_orig, detections, output_queue,
                                 video_writer, out_cfg, self.zone_manager,
                                 self.visualizer, vehicle_tracker,
                             )
+                            if _pf: _pf.record(video_name, fd_orig.index, "visualize", (time.perf_counter() - t) * 1000)
 
                     batch_buffer.clear()
                     frames_processed += len(batch_frames)
@@ -294,8 +310,13 @@ class Pipeline:
                     continue
 
                 # ─── Single-frame path ────────────────
+                t = time.perf_counter()
                 raw_detections = self.detector.detect(processed)
+                if _pf: _pf.record(video_name, fi, "detect", (time.perf_counter() - t) * 1000)
+
+                t = time.perf_counter()
                 detections = self.tracker.update(raw_detections, processed)
+                if _pf: _pf.record(video_name, fi, "track", (time.perf_counter() - t) * 1000)
 
                 vehicle_tracker.update_batch(detections)
 
@@ -303,6 +324,7 @@ class Pipeline:
                     detections = self.mask_manager.filter_detections(detections)
 
                 if self.zone_manager:
+                    t = time.perf_counter()
                     for det in detections:
                         exact_time = calculate_exact_time(base_time, ts) or "00:00:00"
                         self.zone_manager.check_entry(
@@ -314,13 +336,16 @@ class Pipeline:
                             date=date,
                             exact_time=exact_time,
                         )
+                    if _pf: _pf.record(video_name, fi, "zone_check", (time.perf_counter() - t) * 1000)
 
                 if video_writer and output_queue is not None:
+                    t = time.perf_counter()
                     _write_frame(
                         fd, detections, output_queue,
                         video_writer, out_cfg, self.zone_manager,
                         self.visualizer, vehicle_tracker,
                     )
+                    if _pf: _pf.record(video_name, fi, "visualize", (time.perf_counter() - t) * 1000)
 
                 frames_processed += 1
                 _update_progress(frames_processed, max_frames, start_time, pbar, self.zone_manager, on_progress, out_cfg)
@@ -331,15 +356,23 @@ class Pipeline:
                 batch_frames = [b[1] for b in batch_buffer]
                 batch_ts = [b[2] for b in batch_buffer]
                 batch_originals = [b[0] for b in batch_buffer]
+                first_fi = batch_originals[0].index
+
+                t = time.perf_counter()
                 raw_detections_batch = self.detector.detect_batch(batch_frames)
+                if _pf: _pf.record(video_name, first_fi, "detect", (time.perf_counter() - t) * 1000, batch=len(batch_frames))
+
                 for raw_detections, ts_orig, fd_orig, proc_frame in zip(
                     raw_detections_batch, batch_ts, batch_originals, batch_frames
                 ):
+                    t = time.perf_counter()
                     detections = self.tracker.update(raw_detections, proc_frame)
+                    if _pf: _pf.record(video_name, fd_orig.index, "track", (time.perf_counter() - t) * 1000)
                     vehicle_tracker.update_batch(detections)
                     if self.mask_manager.is_loaded:
                         detections = self.mask_manager.filter_detections(detections)
                     if self.zone_manager:
+                        t = time.perf_counter()
                         for det in detections:
                             exact_time = calculate_exact_time(base_time, ts_orig) or "00:00:00"
                             self.zone_manager.check_entry(
@@ -351,12 +384,15 @@ class Pipeline:
                                 date=date,
                                 exact_time=exact_time,
                             )
+                        if _pf: _pf.record(video_name, fd_orig.index, "zone_check", (time.perf_counter() - t) * 1000)
                     if video_writer and output_queue is not None:
+                        t = time.perf_counter()
                         _write_frame(
                             fd_orig, detections, output_queue,
                             video_writer, out_cfg, self.zone_manager,
                             self.visualizer, vehicle_tracker,
                         )
+                        if _pf: _pf.record(video_name, fd_orig.index, "visualize", (time.perf_counter() - t) * 1000)
                 batch_buffer.clear()
                 frames_processed += len(batch_frames)
 
@@ -385,6 +421,11 @@ class Pipeline:
                 self.csv_exporter.export_vehicle_types(detection_log, types_path)
 
                 csv_path = det_path
+
+            if _pf:
+                profile_saved = _pf.save()
+                if out_cfg.verbose:
+                    print(f"📊 Profile: {profile_saved}")
 
             processing_time = time.time() - start_time
             fps = frames_processed / processing_time if processing_time > 0 else 0
