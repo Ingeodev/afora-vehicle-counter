@@ -5,7 +5,7 @@ import pytest
 class TestRealVideoSmoke:
     """Verifica que el pipeline procesa 20 segundos de video real sin errores."""
 
-    def test_process_20_seconds(self, assets_dir, output_dir):
+    def test_process_20_seconds_yolo(self, assets_dir, output_dir):
         from afora_vc.application.facade import process_video
 
         result = process_video(
@@ -17,6 +17,26 @@ class TestRealVideoSmoke:
             max_minutes=20 / 60,
             quiet=True,
             no_video=True,
+        )
+
+        assert result.total_detections > 0, "Debe detectar al menos un vehiculo"
+        assert len(result.zone_counts) > 0, "Debe haber conteos por zona"
+        assert result.frames_processed > 0, "Debe procesar al menos un frame"
+
+    def test_process_20_seconds_tensorrt(self, assets_dir, output_dir):
+        from afora_vc.application.facade import process_video
+
+        result = process_video(
+            video=str(assets_dir / "video.mp4"),
+            zones=str(assets_dir / "zones.json"),
+            mask=str(assets_dir / "mask.png"),
+            output=str(output_dir),
+            model="models/rtdetr-l.engine",
+            max_minutes=20 / 60,
+            quiet=True,
+            no_video=True,
+            backend="rtdetr",
+            device="cuda",
         )
 
         assert result.total_detections > 0, "Debe detectar al menos un vehiculo"
