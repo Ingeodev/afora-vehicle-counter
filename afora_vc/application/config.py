@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from ..domain.enums import DeviceType, DetectorBackend, TrackerBackend, PreprocessMode, DetectorStrategy
+from ..domain.enums import DeviceType, DetectorBackend, TrackerBackend, PreprocessMode, DetectorStrategy, PipelineMode
 from ..utils.device import detect_device
 
 
@@ -78,6 +78,7 @@ class PreprocessConfig:
 
 @dataclass
 class PipelineConfig:
+    pipeline_mode: PipelineMode = PipelineMode.SEQUENTIAL
     video: VideoConfig = field(default_factory=VideoConfig)
     detector: DetectorConfig = field(default_factory=DetectorConfig)
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
@@ -93,6 +94,11 @@ class PipelineConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "PipelineConfig":
+        pipeline_mode_str = data.get("pipeline_mode", "sequential")
+        if isinstance(pipeline_mode_str, str):
+            pipeline_mode = PipelineMode(pipeline_mode_str)
+        else:
+            pipeline_mode = pipeline_mode_str
         video_data = data.get("video", {})
         detector_data = data.get("detector", {})
         tracker_data = data.get("tracker", {})
@@ -111,6 +117,7 @@ class PipelineConfig:
             detector_data["strategy"] = DetectorStrategy(detector_data["strategy"])
 
         return cls(
+            pipeline_mode=pipeline_mode,
             video=VideoConfig(**video_data),
             detector=DetectorConfig(**detector_data),
             tracker=TrackerConfig(**tracker_data),
@@ -126,6 +133,7 @@ class PipelineConfig:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "pipeline_mode": self.pipeline_mode.value,
             "video": {
                 "reduce_factor": self.video.reduce_factor,
                 "max_minutes": self.video.max_minutes,

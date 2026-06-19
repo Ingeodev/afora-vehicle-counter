@@ -9,7 +9,7 @@ from .schemas import (
     VideoInfo,
     FrameData,
 )
-from .enums import DeviceType, DetectorBackend, TrackerBackend, PreprocessMode, DetectorStrategy
+from .enums import DeviceType, DetectorBackend, TrackerBackend, PreprocessMode, DetectorStrategy, PipelineMode
 from .exceptions import (
     AforosError,
     VideoNotFoundError,
@@ -37,6 +37,7 @@ __all__ = [
     "TrackerBackend",
     "PreprocessMode",
     "DetectorStrategy",
+    "PipelineMode",
     "AforosError",
     "VideoNotFoundError",
     "VideoOpenError",

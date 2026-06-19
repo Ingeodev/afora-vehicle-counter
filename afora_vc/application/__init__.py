@@ -1,4 +1,5 @@
 from .pipeline import Pipeline, PipelineContext
+from .pipelined_pipeline import PipelinedPipeline
 from .config import (
     PipelineConfig,
     DetectorConfig,
@@ -14,6 +15,7 @@ from .facade import process_video, process_directory
 __all__ = [
     "Pipeline",
     "PipelineContext",
+    "PipelinedPipeline",
     "PipelineConfig",
     "DetectorConfig",
     "TrackerConfig",

@@ -11,17 +11,18 @@ from ..domain.exceptions import (
     OutputDirectoryError,
     BackendNotRegisteredError,
 )
-from ..domain.enums import DeviceType, DetectorBackend, TrackerBackend, PreprocessMode
+from ..domain.enums import DeviceType, DetectorBackend, TrackerBackend, PreprocessMode, PipelineMode
 from ..adapters import DetectorRegistry, TrackerRegistry
 from .config import PipelineConfig
 from .pipeline import Pipeline
+from .pipelined_pipeline import PipelinedPipeline
 
 
 def _build_pipeline(
     config: PipelineConfig,
     model_path: str,
     config_type: str,
-) -> Pipeline:
+) -> Pipeline | PipelinedPipeline:
     from ..adapters.preprocessors.noop import NoOpPreprocessor
     from ..adapters.preprocessors.deblurring import DeblurringPreprocessor
 
@@ -61,7 +62,8 @@ def _build_pipeline(
     else:
         preprocessor = NoOpPreprocessor()
 
-    return Pipeline(
+    pipeline_cls = PipelinedPipeline if config.pipeline_mode == PipelineMode.PIPELINED else Pipeline
+    return pipeline_cls(
         config=config,
         detector=detector,
         tracker=tracker,
@@ -91,6 +93,8 @@ def process_video(
     batch_size: int = 1,
     output_name: Optional[str] = None,
     tracker_config: Optional[str] = None,
+    pipeline_mode: str = "sequential",
+    queue_maxsize: int = 4,
 ) -> ProcessingResult:
     import os
 
@@ -128,6 +132,10 @@ def process_video(
     # Batch
     config.batch.enabled = batch_size > 1
     config.batch.batch_size = batch_size
+    config.batch.queue_maxsize = queue_maxsize
+
+    # Pipeline mode
+    config.pipeline_mode = PipelineMode(pipeline_mode)
 
     # Model config overrides
     if model_config:
@@ -195,7 +203,7 @@ def process_directory(
                     "max_minutes", "strategy", "night_enhance", "model_config",
                     "deblurring", "no_video", "quiet", "backend",
                     "tracker_backend", "batch_size", "tracker_config",
-                    "output_name",
+                    "output_name", "pipeline_mode", "queue_maxsize",
                 ]},
             )
             results.append(result)

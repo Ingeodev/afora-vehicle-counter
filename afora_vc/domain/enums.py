@@ -28,3 +28,8 @@ class PreprocessMode(str, Enum):
 class DetectorStrategy(str, Enum):
     BOX = "box"
     SEG = "seg"
+
+
+class PipelineMode(str, Enum):
+    SEQUENTIAL = "sequential"
+    PIPELINED = "pipelined"
