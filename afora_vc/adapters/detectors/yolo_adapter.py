@@ -11,7 +11,7 @@ from ...domain.exceptions import BackendNotInstalledError
 class YOLODetectorAdapter:
     def __init__(
         self,
-        model_path: str = "yolov8s.pt",
+        model_path: str = "models/yolov8s.pt",
         device: DeviceType = DeviceType.CPU,
         vehicle_classes: dict[int, str] | None = None,
         confidence_threshold: float = 0.5,

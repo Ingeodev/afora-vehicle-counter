@@ -5,6 +5,11 @@ from ..ports.storage import StorageReader
 from ..schemas import Detection
 
 
+def _squeeze(mask: np.ndarray) -> np.ndarray:
+    """Ensure mask is 2D (H, W); ultralytics import can make cv2 return (H, W, 1)."""
+    return np.squeeze(mask) if mask.ndim == 3 else mask
+
+
 class MaskManager:
     def __init__(self):
         self._mask_original: np.ndarray | None = None
@@ -17,6 +22,7 @@ class MaskManager:
             mask = cv2.imread(local_path, cv2.IMREAD_GRAYSCALE)
             if mask is None:
                 return False
+            mask = _squeeze(mask)
             self._mask_original = mask
             self._mask_resized = mask.copy()
             self._current_size = (mask.shape[1], mask.shape[0])
@@ -29,6 +35,7 @@ class MaskManager:
             mask = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
             if mask is None:
                 return False
+            mask = _squeeze(mask)
             self._mask_original = mask
             self._mask_resized = mask.copy()
             self._current_size = (mask.shape[1], mask.shape[0])
@@ -41,9 +48,10 @@ class MaskManager:
             return
         if self._current_size == (width, height):
             return
-        self._mask_resized = cv2.resize(
+        resized = cv2.resize(
             self._mask_original, (width, height), interpolation=cv2.INTER_NEAREST
         )
+        self._mask_resized = _squeeze(resized)
         self._current_size = (width, height)
 
     def is_point_valid(self, x: int, y: int) -> bool:

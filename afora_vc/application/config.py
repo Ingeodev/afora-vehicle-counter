@@ -39,7 +39,7 @@ class VideoConfig:
 @dataclass
 class DetectorConfig:
     backend: DetectorBackend = DetectorBackend.YOLO
-    model_path: str = "yolov8s.pt"
+    model_path: str = "models/yolov8s.pt"
     device: DeviceType = field(default_factory=detect_device)
     confidence_threshold: float = 0.5
     strategy: DetectorStrategy = DetectorStrategy.BOX

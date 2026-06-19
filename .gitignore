@@ -8,8 +8,8 @@ __pycache__/
 *.pt
 *.pth
 *.onnx
-yolov8s.pt
-tests/assets/output_*/
-tests/assets/video.mp4
-tests/assets/expected/
-output/
+tests/assets/*
+tests/assets/.gitkeep
+models/*
+!models/.gitkeep
+output*

@@ -77,7 +77,7 @@ def process_video(
     base_time: str = "00:00",
     date: str = "2025-01-01",
     device: Optional[Literal["cpu", "cuda", "mps"]] = None,
-    model: str = "yolov8s.pt",
+    model: str = "models/yolov8s.pt",
     reduce: int = 1,
     max_minutes: Optional[float] = None,
     strategy: Literal["box", "seg"] = "box",

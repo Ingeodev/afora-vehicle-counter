@@ -16,8 +16,8 @@ def _register_default_detectors():
         pass
 
     try:
-        from .detectors.rtdetr_adapter import RTDETRDetectorAdapter
-        DetectorRegistry.register("rtdetr", RTDETRDetectorAdapter)
+        from .detectors.rtdetr_adapter import RTDetrDetectorAdapter
+        DetectorRegistry.register("rtdetr", RTDetrDetectorAdapter)
     except ImportError:
         pass
 
