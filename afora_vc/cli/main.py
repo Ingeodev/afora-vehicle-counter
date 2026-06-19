@@ -37,6 +37,8 @@ def main():
     p.add_argument("--output-name", type=str, help="Nombre del video de salida")
     p.add_argument("--batch-size", type=int, default=1, help="Tamano de batch")
     p.add_argument("--tracker-config", type=str, help="YAML de config del tracker")
+    p.add_argument("--pipeline-mode", default="sequential", choices=["sequential", "pipelined"], help="Modo de pipeline")
+    p.add_argument("--profile", action="store_true", help="Habilitar profiling por paso")
 
     # scan
     s = subparsers.add_parser("scan", help="Procesar directorio de videos")
@@ -106,6 +108,8 @@ def _cmd_process(args):
         output_name=args.output_name,
         batch_size=args.batch_size,
         tracker_config=args.tracker_config,
+        pipeline_mode=args.pipeline_mode,
+        profile=args.profile,
     )
 
     if not args.quiet:
