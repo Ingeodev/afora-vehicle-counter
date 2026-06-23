@@ -97,6 +97,7 @@ def process_video(
     queue_maxsize: int = 4,
     profile: bool = False,
     profile_path: str | None = None,
+    audit: bool = False,
 ) -> ProcessingResult:
     import os
 
@@ -159,11 +160,16 @@ def process_video(
                 int(k): str(v) for k, v in model_params["vehicle_classes"].items()
             }
 
+    from ..utils.auditor import Auditor
     from ..utils.profiler import Profiler
 
     _profiler: Profiler | None = None
     if profile:
         _profiler = Profiler(csv_path=profile_path or f"{output}/profile.csv")
+
+    _auditor: Auditor | None = None
+    if audit:
+        _auditor = Auditor()
 
     pipeline = _build_pipeline(config, model, strategy)
 
@@ -178,7 +184,11 @@ def process_video(
         enable_deblurring=deblurring,
         enable_night_enhance=night_enhance,
         profiler=_profiler,
+        auditor=_auditor,
     )
+
+    if _auditor:
+        print(_auditor.report())
 
     if not quiet:
         print(f"\n✅ Completado: {result.total_detections} detecciones")
@@ -213,7 +223,7 @@ def process_directory(
                     "deblurring", "no_video", "quiet", "backend",
                     "tracker_backend", "batch_size", "tracker_config",
                     "output_name", "pipeline_mode", "queue_maxsize",
-                    "profile", "profile_path",
+                    "profile", "profile_path", "audit",
                 ]},
             )
             results.append(result)

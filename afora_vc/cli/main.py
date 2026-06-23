@@ -39,6 +39,7 @@ def main():
     p.add_argument("--tracker-config", type=str, help="YAML de config del tracker")
     p.add_argument("--pipeline-mode", default="sequential", choices=["sequential", "pipelined"], help="Modo de pipeline")
     p.add_argument("--profile", action="store_true", help="Habilitar profiling por paso")
+    p.add_argument("--audit", action="store_true", help="Auditar detecciones por etapa del pipeline")
 
     # scan
     s = subparsers.add_parser("scan", help="Procesar directorio de videos")
@@ -110,6 +111,7 @@ def _cmd_process(args):
         tracker_config=args.tracker_config,
         pipeline_mode=args.pipeline_mode,
         profile=args.profile,
+        audit=args.audit,
     )
 
     if not args.quiet:

@@ -20,6 +20,7 @@ from ..adapters.video.writer import AnnotatedVideoWriter, VideoWriterConfig
 from ..adapters.storage.local import LocalStorageReader, LocalStorageWriter
 from ..output.visualizer import Visualizer
 from ..output.csv_exporter import CSVExporter
+from ..utils.auditor import Auditor
 from ..utils.profiler import Profiler
 from ..utils.time_utils import calculate_exact_time, format_timestamp
 from .config import PipelineConfig, DetectorConfig, TrackerConfig
@@ -112,6 +113,7 @@ class Pipeline:
         enable_deblurring: bool = False,
         enable_night_enhance: bool = False,
         profiler: "Profiler | None" = None,
+        auditor: "Auditor | None" = None,
     ) -> ProcessingResult:
         cfg = self.config
         out_cfg = cfg.output
@@ -119,6 +121,7 @@ class Pipeline:
         import os as _os
         video_name = _os.path.basename(video_path)
         _pf = profiler
+        _au = auditor
 
         output_folder = output_folder or out_cfg.output_folder
         self.writer.makedirs(output_folder)
@@ -267,6 +270,9 @@ class Pipeline:
                     t = time.perf_counter()
                     raw_detections_batch = self.detector.detect_batch(batch_frames)
                     if _pf: _pf.record(video_name, first_fi, "detect", (time.perf_counter() - t) * 1000, batch=len(batch_frames))
+                    if _au:
+                        for i, (rd, fd_orig) in enumerate(zip(raw_detections_batch, batch_originals)):
+                            _au.snapshot("detect", fd_orig.index, len(rd), class_counts=dict(_Counter(d.class_name for d in rd)))
 
                     for raw_detections, ts_orig, fd_orig, proc_frame in zip(
                         raw_detections_batch, batch_ts, batch_originals, batch_frames
@@ -278,6 +284,11 @@ class Pipeline:
 
                         if self.mask_manager.is_loaded:
                             detections = self.mask_manager.filter_detections(detections)
+
+                        if _au:
+                            _au.snapshot("track", fd_orig.index, len(detections), class_counts=dict(_Counter(d.class_name for d in detections)), track_ids={d.track_id for d in detections})
+
+                        zone_count_before = len(self.zone_manager.get_detection_log()) if self.zone_manager else 0
 
                         if self.zone_manager:
                             t = time.perf_counter()
@@ -293,6 +304,10 @@ class Pipeline:
                                     exact_time=exact_time,
                                 )
                             if _pf: _pf.record(video_name, fd_orig.index, "zone_check", (time.perf_counter() - t) * 1000)
+
+                        if _au and self.zone_manager:
+                            zone_entries = len(self.zone_manager.get_detection_log()) - zone_count_before
+                            _au.snapshot("zone_check", fd_orig.index, zone_entries)
 
                         if video_writer and output_queue is not None:
                             t = time.perf_counter()
@@ -313,6 +328,9 @@ class Pipeline:
                 t = time.perf_counter()
                 raw_detections = self.detector.detect(processed)
                 if _pf: _pf.record(video_name, fi, "detect", (time.perf_counter() - t) * 1000)
+                if _au:
+                    from collections import Counter as _Counter
+                    _au.snapshot("detect", fi, len(raw_detections), class_counts=dict(_Counter(d.class_name for d in raw_detections)))
 
                 t = time.perf_counter()
                 detections = self.tracker.update(raw_detections, processed)
@@ -322,6 +340,11 @@ class Pipeline:
 
                 if self.mask_manager.is_loaded:
                     detections = self.mask_manager.filter_detections(detections)
+
+                if _au:
+                    _au.snapshot("track", fi, len(detections), class_counts=dict(_Counter(d.class_name for d in detections)), track_ids={d.track_id for d in detections})
+
+                zone_count_before = len(self.zone_manager.get_detection_log()) if self.zone_manager else 0
 
                 if self.zone_manager:
                     t = time.perf_counter()
@@ -337,6 +360,10 @@ class Pipeline:
                             exact_time=exact_time,
                         )
                     if _pf: _pf.record(video_name, fi, "zone_check", (time.perf_counter() - t) * 1000)
+
+                if _au and self.zone_manager:
+                    zone_entries = len(self.zone_manager.get_detection_log()) - zone_count_before
+                    _au.snapshot("zone_check", fi, zone_entries)
 
                 if video_writer and output_queue is not None:
                     t = time.perf_counter()
@@ -361,6 +388,9 @@ class Pipeline:
                 t = time.perf_counter()
                 raw_detections_batch = self.detector.detect_batch(batch_frames)
                 if _pf: _pf.record(video_name, first_fi, "detect", (time.perf_counter() - t) * 1000, batch=len(batch_frames))
+                if _au:
+                    for i, (rd, fd_orig) in enumerate(zip(raw_detections_batch, batch_originals)):
+                        _au.snapshot("detect", fd_orig.index, len(rd), class_counts=dict(_Counter(d.class_name for d in rd)))
 
                 for raw_detections, ts_orig, fd_orig, proc_frame in zip(
                     raw_detections_batch, batch_ts, batch_originals, batch_frames
@@ -371,6 +401,11 @@ class Pipeline:
                     vehicle_tracker.update_batch(detections)
                     if self.mask_manager.is_loaded:
                         detections = self.mask_manager.filter_detections(detections)
+                    if _au:
+                        _au.snapshot("track", fd_orig.index, len(detections), class_counts=dict(_Counter(d.class_name for d in detections)), track_ids={d.track_id for d in detections})
+
+                    _zone_count_before = len(self.zone_manager.get_detection_log()) if self.zone_manager else 0
+
                     if self.zone_manager:
                         t = time.perf_counter()
                         for det in detections:
@@ -385,6 +420,10 @@ class Pipeline:
                                 exact_time=exact_time,
                             )
                         if _pf: _pf.record(video_name, fd_orig.index, "zone_check", (time.perf_counter() - t) * 1000)
+
+                    if _au and self.zone_manager:
+                        _au.snapshot("zone_check", fd_orig.index, len(self.zone_manager.get_detection_log()) - _zone_count_before)
+
                     if video_writer and output_queue is not None:
                         t = time.perf_counter()
                         _write_frame(

@@ -21,6 +21,7 @@ from ..adapters.video.writer import AnnotatedVideoWriter, VideoWriterConfig
 from ..adapters.storage.local import LocalStorageReader, LocalStorageWriter
 from ..output.visualizer import Visualizer
 from ..output.csv_exporter import CSVExporter
+from ..utils.auditor import Auditor
 from ..utils.profiler import Profiler
 from ..utils.time_utils import calculate_exact_time, format_timestamp
 from .config import PipelineConfig
@@ -65,6 +66,7 @@ class PipelinedPipeline:
         enable_deblurring: bool = False,
         enable_night_enhance: bool = False,
         profiler: Profiler | None = None,
+        auditor: Auditor | None = None,
     ) -> ProcessingResult:
         cfg = self.config
         out_cfg = cfg.output
@@ -72,6 +74,7 @@ class PipelinedPipeline:
         import os as _os
         video_name = _os.path.basename(video_path)
         _pf = profiler
+        _au = auditor
 
         output_folder = output_folder or out_cfg.output_folder
         self.writer.makedirs(output_folder)
@@ -195,11 +198,11 @@ class PipelinedPipeline:
                         buffer.append((processed, fd))
 
                         if not batch_enabled or len(buffer) >= batch_size:
-                            self._flush_raw(buffer, raw_pipe, video_name, _pf)
+                            self._flush_raw(buffer, raw_pipe, video_name, _pf, _au)
                             buffer = []
 
                     if buffer:
-                        self._flush_raw(buffer, raw_pipe, video_name, _pf)
+                        self._flush_raw(buffer, raw_pipe, video_name, _pf, _au)
                 except Exception:
                     import traceback
                     traceback.print_exc()
@@ -246,6 +249,12 @@ class PipelinedPipeline:
                         if self.mask_manager.is_loaded:
                             detections = self.mask_manager.filter_detections(detections)
 
+                        if _au:
+                            from collections import Counter as _Counter
+                            _au.snapshot("track", fd.index, len(detections), class_counts=dict(_Counter(d.class_name for d in detections)), track_ids={d.track_id for d in detections})
+
+                        _zone_count_before = len(self.zone_manager.get_detection_log()) if self.zone_manager else 0
+
                         if self.zone_manager:
                             t = time.perf_counter()
                             for det in detections:
@@ -260,6 +269,9 @@ class PipelinedPipeline:
                                     exact_time=exact_time,
                                 )
                             if _pf: _pf.record(video_name, fd.index, "zone_check", (time.perf_counter() - t) * 1000)
+
+                        if _au and self.zone_manager:
+                            _au.snapshot("zone_check", fd.index, len(self.zone_manager.get_detection_log()) - _zone_count_before)
 
                         if video_writer and output_queue is not None:
                             t = time.perf_counter()
@@ -357,7 +369,10 @@ class PipelinedPipeline:
         raw_pipe: QueuePipe,
         video_name: str = "",
         profiler: "Profiler | None" = None,
+        auditor: "Auditor | None" = None,
     ) -> None:
+        from collections import Counter as _Counter
+
         batch_frames = [p for p, _ in buffer]
         originals = [fd for _, fd in buffer]
         first_fi = originals[0].index if originals else -1
@@ -370,6 +385,10 @@ class PipelinedPipeline:
             raw_list = self.detector.detect_batch(batch_frames)
         if profiler:
             profiler.record(video_name, first_fi, "detect", (time.perf_counter() - t) * 1000, batch=batch)
+
+        if auditor:
+            for i, (rd, fd_orig) in enumerate(zip(raw_list, originals)):
+                auditor.snapshot("detect", fd_orig.index, len(rd), class_counts=dict(_Counter(d.class_name for d in rd)))
 
         for raw_detections, processed_frame, fd_orig in zip(raw_list, batch_frames, originals):
             raw_pipe.send((raw_detections, processed_frame, fd_orig))
