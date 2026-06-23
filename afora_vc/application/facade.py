@@ -13,6 +13,7 @@ from ..domain.exceptions import (
 )
 from ..domain.enums import DeviceType, DetectorBackend, TrackerBackend, PreprocessMode, PipelineMode
 from ..adapters import DetectorRegistry, TrackerRegistry
+from ..utils.display import DisplayManager
 from .config import PipelineConfig
 from .pipeline import Pipeline
 from .pipelined_pipeline import PipelinedPipeline
@@ -171,6 +172,8 @@ def process_video(
     if audit:
         _auditor = Auditor()
 
+    _display = DisplayManager(verbose=not quiet, quiet=quiet)
+
     pipeline = _build_pipeline(config, model, strategy)
 
     result = pipeline.process_video(
@@ -185,13 +188,11 @@ def process_video(
         enable_night_enhance=night_enhance,
         profiler=_profiler,
         auditor=_auditor,
+        display=_display,
     )
 
     if _auditor:
-        print(_auditor.report())
-
-    if not quiet:
-        print(f"\n✅ Completado: {result.total_detections} detecciones")
+        _display.show_audit_report(_auditor.report())
 
     return result
 
@@ -209,7 +210,22 @@ def process_directory(
 
     scan_result = _scan_directory(root_path, reader, recursive)
 
-    for video_info in scan_result:
+    quiet = kwargs.get("quiet", False)
+    _display = DisplayManager(verbose=not quiet, quiet=quiet)
+    total_videos = len(scan_result)
+
+    _display.show_info(f"[bold cyan]📁 Escaneando: {root_path}[/] — [bold]{total_videos}[/] videos encontrados")
+
+    if total_videos == 0:
+        _display.show_warning("No se encontraron videos para procesar")
+        return results
+
+    _display.start_scan(total_videos=total_videos)
+
+    for i, video_info in enumerate(scan_result, 1):
+        video_name = video_info["path"].split("/")[-1].split("\\")[-1]
+        _display.start_video_progress(total=100, description=f"[{i}/{total_videos}] {video_name}")
+
         output_folder = output_base or video_info.get("output_folder", "./output")
         try:
             result = process_video(
@@ -228,7 +244,15 @@ def process_directory(
             )
             results.append(result)
         except Exception as e:
-            print(f"❌ Error procesando {video_info['path']}: {e}")
+            _display.show_error(str(e), context=video_name)
+        finally:
+            _display.stop_video_progress()
+            _display.update_scan(advance=1)
+
+    _display.stop_scan()
+
+    total_detections = sum(r.total_detections for r in results)
+    _display.show_success(f"Procesados {total_videos} videos, {total_detections} detecciones totales")
 
     return results
 

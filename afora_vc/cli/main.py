@@ -2,6 +2,7 @@ import sys
 
 from ..application.facade import process_video, process_directory
 from ..domain.exceptions import AforosError
+from ..utils.display import DisplayManager
 
 
 def main():
@@ -71,16 +72,18 @@ def main():
         parser.print_help()
         return 0
 
+    _display = DisplayManager(verbose=not getattr(args, 'quiet', False), quiet=getattr(args, 'quiet', False))
+
     try:
         if args.command == "process":
             return _cmd_process(args)
         elif args.command == "scan":
             return _cmd_scan(args)
     except AforosError as e:
-        print(f"❌ Error: {e}", file=sys.stderr)
+        _display.show_error(str(e), context="AforosError")
         return 1
     except Exception as e:
-        print(f"❌ Error inesperado: {e}", file=sys.stderr)
+        _display.show_error(str(e), context="inesperado")
         return 1
 
     return 0

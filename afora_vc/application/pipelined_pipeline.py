@@ -5,7 +5,6 @@ from queue import Queue
 from threading import Thread
 
 import numpy as np
-from tqdm import tqdm
 
 from ..adapters.pipes import QueuePipe
 from ..domain.pipes import IdentityMapper
@@ -24,6 +23,7 @@ from ..output.visualizer import Visualizer
 from ..output.csv_exporter import CSVExporter
 from ..utils.auditor import Auditor
 from ..utils.profiler import Profiler
+from ..utils.display import DisplayManager
 from ..utils.time_utils import calculate_exact_time, format_timestamp
 from .config import PipelineConfig
 from .pipeline import _write_frame, _update_progress
@@ -68,6 +68,7 @@ class PipelinedPipeline:
         enable_night_enhance: bool = False,
         profiler: Profiler | None = None,
         auditor: Auditor | None = None,
+        display: DisplayManager | None = None,
     ) -> ProcessingResult:
         cfg = self.config
         out_cfg = cfg.output
@@ -76,6 +77,9 @@ class PipelinedPipeline:
         video_name = _os.path.basename(video_path)
         _pf = profiler
         _au = auditor
+
+        if display is None:
+            display = DisplayManager(verbose=out_cfg.verbose, quiet=not out_cfg.verbose)
 
         output_folder = output_folder or out_cfg.output_folder
         self.writer.makedirs(output_folder)
@@ -110,6 +114,22 @@ class PipelinedPipeline:
                 max_frames = video.total_frames
 
             vehicle_tracker = VehicleTracker()
+
+            display.show_start_summary(
+                video_name=video_name,
+                total_frames=max_frames,
+                fps=video.fps,
+                resolution=(new_width, new_height),
+                backend=cfg.detector.backend.value if hasattr(cfg.detector.backend, 'value') else str(cfg.detector.backend),
+                model=cfg.detector.model_path,
+                device=cfg.detector.device.value if hasattr(cfg.detector.device, 'value') else str(cfg.detector.device),
+                batch_size=cfg.batch.batch_size,
+                pipeline_mode=cfg.pipeline_mode.value if hasattr(cfg.pipeline_mode, 'value') else str(cfg.pipeline_mode),
+                reduce_factor=reduce_factor,
+                zones_count=len(self.zone_manager.zones) if self.zone_manager.zones else 0,
+                save_video=out_cfg.save_video,
+                save_csv=out_cfg.save_csv,
+            )
 
             output_video_path = None
             video_writer = None
@@ -146,12 +166,7 @@ class PipelinedPipeline:
             else:
                 reader_preprocessor = NoOpPreprocessor()
 
-            pbar = tqdm(
-                total=max_frames,
-                unit="frames",
-                desc=f"Procesando {output_name or 'video'}",
-                disable=not out_cfg.verbose,
-            )
+            display.start_progress(total=max_frames, description=f"Procesando {output_name or 'video'}")
 
             if hasattr(self.detector, "warmup"):
                 self.detector.warmup((new_height, new_width, 3))
@@ -229,7 +244,7 @@ class PipelinedPipeline:
                     finally:
                         video_writer.close()
 
-                writer_thread = Thread(target=_writer_worker, daemon=True)
+                writer_thread = Thread(target=_writer_worker)
                 writer_thread.start()
 
             def _tracker_worker():
@@ -297,8 +312,8 @@ class PipelinedPipeline:
                             if _pf: _pf.record(video_name, fd.index, "visualize", (time.perf_counter() - t) * 1000)
 
                         frames_processed += 1
-                        _update_progress(frames_processed, max_frames, start_time, pbar, self.zone_manager, on_progress, out_cfg)
-                        pbar.update(1)
+                        _update_progress(frames_processed, max_frames, start_time, display, self.zone_manager, on_progress, out_cfg)
+                        display.update_progress(advance=1)
                 except Exception:
                     import traceback
                     traceback.print_exc()
@@ -315,9 +330,10 @@ class PipelinedPipeline:
             tracker_thread.join(timeout=300)
 
             if writer_thread is not None and output_queue is not None:
-                writer_thread.join(timeout=10)
+                output_queue.put(None)
+                writer_thread.join()
 
-            pbar.close()
+            display.stop_progress()
 
             # ─── CSV export ──────────────────────────────────────
             csv_path = None
@@ -338,30 +354,26 @@ class PipelinedPipeline:
 
                 csv_path = det_path
 
+            profile_path = None
             if _pf:
-                _pf.save()
+                profile_path = _pf.save()
 
             processing_time = time.time() - start_time
-            fps = frames_processed / processing_time if processing_time > 0 else 0
+            fps_value = frames_processed / processing_time if processing_time > 0 else 0
             detection_log = self.zone_manager.get_detection_log() if self.zone_manager else []
             zone_counts = self.zone_manager.get_zone_counts() if self.zone_manager else {}
 
-            if out_cfg.verbose:
-                print("\n" + "=" * 70)
-                print("✅ PROCESO COMPLETADO")
-                print("=" * 70)
-                print(f"⏱️ Tiempo: {processing_time / 60:.2f} min ({processing_time:.1f}s)")
-                print(f"🎞️ Frames: {frames_processed} | {fps:.1f} FPS avg")
-                if output_video_path:
-                    print(f"📁 Video: {output_video_path}")
-                if csv_path:
-                    print(f"📊 CSV: {csv_path}")
-                print(f"\n🚗 Detecciones totales: {len(detection_log)}")
-                if zone_counts:
-                    print("\n📍 POR ZONA:")
-                    for zone, count in sorted(zone_counts.items()):
-                        print(f"   Zona {zone}: {count}")
-                print("=" * 70)
+            display.show_end_summary(
+                video_name=video_name,
+                processing_time=processing_time,
+                frames_processed=frames_processed,
+                fps=fps_value,
+                total_detections=len(detection_log),
+                zone_counts=zone_counts,
+                csv_path=csv_path,
+                video_path=output_video_path,
+                profile_path=profile_path,
+            )
 
             return ProcessingResult(
                 video_path=video_path,
