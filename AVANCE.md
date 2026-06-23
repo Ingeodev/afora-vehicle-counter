@@ -36,6 +36,19 @@
 - 11 tests en `test_profiler.py` (single/multi-thread, CSV export, edge cases)
 - 136 tests unitarios totales pasando
 
+### 4. `2d99c8b` — Flags CLI `--pipeline-mode` y `--profile`
+
+- Agregados al parser `process` para habilitar modo pipeline y profiling desde línea de comandos
+
+### 5. `3566d7a` — Pipeline Auditor para debug de detecciones perdidas
+
+- **`utils/auditor.py`**: Clase `Auditor` thread-safe + `StageSnapshot` dataclass
+- **`report()`**: genera reporte de texto con resumen por etapa (detect → track → zone_check) y tabla frame a frame
+- Integración en ambos pipelines (sequential y pipelined) en los puntos clave: después de detect, después de track + mask, después de zone_check
+- Nuevo flag `--audit` en CLI y facade
+- 10 tests en `test_auditor.py`
+- 146 tests unitarios totales pasando
+
 ## Benchmark comparativo (CPU, YOLOv8s, reduce=2, 297 frames)
 
 | Métrica | Sequential | Pipelined | Ganancia |
