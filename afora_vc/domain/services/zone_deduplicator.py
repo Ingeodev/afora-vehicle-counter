@@ -45,7 +45,7 @@ class ZoneDeduplicator:
         if zone not in self._zone_entries:
             self._zone_entries[zone] = []
 
-        is_duplicate = self._check_duplicate(zone, position, timestamp, vehicle_type)
+        is_duplicate = self._check_duplicate(zone, track_id, position, timestamp, vehicle_type)
 
         entry = ZoneEntryRecord(
             track_id=track_id,
@@ -67,7 +67,7 @@ class ZoneDeduplicator:
         return True
 
     def _check_duplicate(
-        self, zone: str, position: tuple[int, int], timestamp: float, vehicle_type: str
+        self, zone: str, track_id: int, position: tuple[int, int], timestamp: float, vehicle_type: str
     ) -> bool:
         if zone not in self._zone_entries:
             return False
@@ -75,6 +75,8 @@ class ZoneDeduplicator:
         recent_entries = self._zone_entries[zone]
 
         for entry in reversed(recent_entries):
+            if entry.track_id != track_id:
+                continue
             time_diff = timestamp - entry.timestamp
             if time_diff > self.temporal_threshold:
                 break

@@ -91,6 +91,6 @@ class TestAuditor:
         au.snapshot("detect", 0, 5)
         au.snapshot("track", 0, 3, track_ids={1, 2})
         au.snapshot("zone_check", 0, 2)
-        au.snapshot("csv", 0, 3)
+        au.snapshot("zone_display", 0, 3)
         report = au.report()
-        assert "[csv]" in report
+        assert "[zone_display]" in report

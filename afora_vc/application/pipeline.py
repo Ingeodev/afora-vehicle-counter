@@ -1,4 +1,5 @@
 import time
+from collections import Counter
 from typing import Callable
 from queue import Queue
 from threading import Thread
@@ -307,7 +308,21 @@ class Pipeline:
 
                         if _au and self.zone_manager:
                             zone_entries = len(self.zone_manager.get_detection_log()) - zone_count_before
-                            _au.snapshot("zone_check", fd_orig.index, zone_entries)
+                            if zone_entries > 0:
+                                _new_log = self.zone_manager.get_detection_log()[zone_count_before:]
+                                _au.snapshot("zone_check", fd_orig.index, zone_entries,
+                                              class_counts=dict(Counter(e.zone for e in _new_log)),
+                                              track_ids={e.vehicle_id for e in _new_log})
+                            else:
+                                _au.snapshot("zone_check", fd_orig.index, 0)
+
+                        if _au and self.zone_manager:
+                            for det in detections:
+                                zv = self.zone_manager.get_zones_for_vehicle(det.track_id)
+                                if zv:
+                                    for z in zv:
+                                        _au.snapshot("zone_display", fd_orig.index, 1,
+                                                      class_counts={z: 1}, track_ids={det.track_id})
 
                         if video_writer and output_queue is not None:
                             t = time.perf_counter()
@@ -363,7 +378,21 @@ class Pipeline:
 
                 if _au and self.zone_manager:
                     zone_entries = len(self.zone_manager.get_detection_log()) - zone_count_before
-                    _au.snapshot("zone_check", fi, zone_entries)
+                    if zone_entries > 0:
+                        _new_log = self.zone_manager.get_detection_log()[zone_count_before:]
+                        _au.snapshot("zone_check", fi, zone_entries,
+                                          class_counts=dict(Counter(e.zone for e in _new_log)),
+                                      track_ids={e.vehicle_id for e in _new_log})
+                    else:
+                        _au.snapshot("zone_check", fi, 0)
+
+                if _au and self.zone_manager:
+                    for det in detections:
+                        zv = self.zone_manager.get_zones_for_vehicle(det.track_id)
+                        if zv:
+                            for z in zv:
+                                _au.snapshot("zone_display", fi, 1,
+                                              class_counts={z: 1}, track_ids={det.track_id})
 
                 if video_writer and output_queue is not None:
                     t = time.perf_counter()
@@ -422,7 +451,20 @@ class Pipeline:
                         if _pf: _pf.record(video_name, fd_orig.index, "zone_check", (time.perf_counter() - t) * 1000)
 
                     if _au and self.zone_manager:
-                        _au.snapshot("zone_check", fd_orig.index, len(self.zone_manager.get_detection_log()) - _zone_count_before)
+                        _zone_entries = len(self.zone_manager.get_detection_log()) - _zone_count_before
+                        if _zone_entries > 0:
+                            _new_log = self.zone_manager.get_detection_log()[_zone_count_before:]
+                            _au.snapshot("zone_check", fd_orig.index, _zone_entries,
+                                      class_counts=dict(Counter(e.zone for e in _new_log)),
+                                          track_ids={e.vehicle_id for e in _new_log})
+                        else:
+                            _au.snapshot("zone_check", fd_orig.index, 0)
+                        for det in detections:
+                            zv = self.zone_manager.get_zones_for_vehicle(det.track_id)
+                            if zv:
+                                for z in zv:
+                                    _au.snapshot("zone_display", fd_orig.index, 1,
+                                                  class_counts={z: 1}, track_ids={det.track_id})
 
                     if video_writer and output_queue is not None:
                         t = time.perf_counter()

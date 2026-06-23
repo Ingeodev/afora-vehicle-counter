@@ -1,4 +1,5 @@
 import time
+from collections import Counter
 from typing import Callable
 from queue import Queue
 from threading import Thread
@@ -271,7 +272,20 @@ class PipelinedPipeline:
                             if _pf: _pf.record(video_name, fd.index, "zone_check", (time.perf_counter() - t) * 1000)
 
                         if _au and self.zone_manager:
-                            _au.snapshot("zone_check", fd.index, len(self.zone_manager.get_detection_log()) - _zone_count_before)
+                            _zone_entries = len(self.zone_manager.get_detection_log()) - _zone_count_before
+                            if _zone_entries > 0:
+                                _new_log = self.zone_manager.get_detection_log()[_zone_count_before:]
+                                _au.snapshot("zone_check", fd.index, _zone_entries,
+                                              class_counts=dict(Counter(e.zone for e in _new_log)),
+                                              track_ids={e.vehicle_id for e in _new_log})
+                            else:
+                                _au.snapshot("zone_check", fd.index, 0)
+                            for det in detections:
+                                zv = self.zone_manager.get_zones_for_vehicle(det.track_id)
+                                if zv:
+                                    for z in zv:
+                                        _au.snapshot("zone_display", fd.index, 1,
+                                                      class_counts={z: 1}, track_ids={det.track_id})
 
                         if video_writer and output_queue is not None:
                             t = time.perf_counter()

@@ -46,7 +46,7 @@ class Auditor:
             if not self._snapshots:
                 return "No audit data."
 
-        stages_order = ["detect", "track", "mask", "zone_check", "csv"]
+        stages_order = ["detect", "track", "mask", "zone_check", "zone_display"]
         stage_frames: dict[str, list[StageSnapshot]] = defaultdict(list)
         for s in self._snapshots:
             stage_frames[s.stage].append(s)
@@ -88,12 +88,49 @@ class Auditor:
             if all_track_ids:
                 lines.append(f"  Unique track IDs : {len(all_track_ids)}")
 
+        # ─── Zone display vs CSV comparison ──────────
+        zd_snaps = stage_frames.get("zone_display", [])
+        zc_snaps = stage_frames.get("zone_check", [])
+        if zd_snaps:
+            lines.append("")
+            lines.append("=" * 72)
+            lines.append("ZONE DISPLAY vs ZONE CHECK (boxes with zone label vs CSV entries)")
+            lines.append("=" * 72)
+
+            zd_track_zones: dict[int, set[str]] = defaultdict(set)
+            for s in zd_snaps:
+                for tid in s.track_ids:
+                    zd_track_zones[tid].update(s.class_counts.keys())
+
+            zc_total = sum(s.total for s in zc_snaps) if zc_snaps else 0
+
+            zd_unique_tracks = {tid for s in zd_snaps for tid in s.track_ids}
+            lines.append(f"  Boxes with zone label : {sum(s.total for s in zd_snaps)} zone labels on {len(zd_unique_tracks)} vehicles")
+            lines.append(f"  CSV zone entries      : {zc_total}")
+            lines.append(f"  Gap (shown but not in CSV): {sum(s.total for s in zd_snaps) - zc_total}")
+            lines.append("")
+            lines.append(f"  Vehicles with zone on box but NO CSV entry:")
+            missing = 0
+            for tid in sorted(zd_track_zones.keys()):
+                zones_shown = zd_track_zones[tid]
+                zones_logged: set[str] = set()
+                for s in zc_snaps:
+                    if tid in s.track_ids:
+                        zones_logged.update(s.class_counts.keys())
+                not_in_csv = zones_shown - zones_logged
+                if not_in_csv:
+                    missing += 1
+                    lines.append(f"    track_id={tid:>3}: zones on box={zones_shown}, in CSV={zones_logged}, MISSING={not_in_csv}")
+            if missing == 0:
+                lines.append("    (none — all match)")
+
         lines.append("")
         lines.append("=" * 72)
         lines.append("STAGE TRANSITION (per-frame deltas)")
         lines.append("=" * 72)
-        lines.append(f"  {'Frame':>6}  {'detect':>7}  {'track':>7}  {'mask':>7}  {'zone':>7}  {'csv':>7}")
-        lines.append(f"  {'-'*6}  {'-'*7}  {'-'*7}  {'-'*7}  {'-'*7}  {'-'*7}")
+        headers = [f"{'Frame':>6}"] + [f"{s:>11}" for s in stages_order]
+        lines.append("  " + "  ".join(headers))
+        lines.append("  " + "  ".join(["-" * 6] + ["-" * 11 for _ in stages_order]))
 
         # Find common frames across stages
         frame_stages: dict[int, dict[str, int]] = defaultdict(dict)
