@@ -19,9 +19,9 @@ $PIP = "$VENV_DIR\Scripts\pip.exe"
 Write-Host "=== Instalacion de afora-vehicle-counter ===" -ForegroundColor Cyan
 Write-Host "Destino:  $VENV_DIR" -ForegroundColor White
 
-# ── Detectar CUDA ──────────────────────────────────────────
+# -- Detectar CUDA --
 $CUDA_VERSION = $null
-$TORCH_INDEX = ""  # vacio = PyPI por defecto (CPU en Windows)
+$TORCH_INDEX = ""
 
 try {
     $nvccOut = & "nvcc" "--version" 2>&1
@@ -31,7 +31,7 @@ try {
         Write-Host "CUDA detectado: $CUDA_VERSION" -ForegroundColor Green
     }
 } catch {
-    Write-Host "CUDA no detectado — se instalara PyTorch CPU" -ForegroundColor Yellow
+    Write-Host "CUDA no detectado - se instalara PyTorch CPU" -ForegroundColor Yellow
 }
 
 if ($CUDA_VERSION) {
@@ -40,32 +40,31 @@ if ($CUDA_VERSION) {
         "12.4*"  { "cu124" }
         "12.1*"  { "cu121" }
         "11.8*"  { "cu118" }
-        "13*"    { "cu126" }   # CUDA 13.x corre con binarios cu126
+        "13*"    { "cu126" }
         default  { $null }
     }
     if ($CUDA_SUFFIX) {
         $TORCH_INDEX = "https://download.pytorch.org/whl/$CUDA_SUFFIX"
         Write-Host "Index PyTorch: $TORCH_INDEX" -ForegroundColor Green
     } else {
-        Write-Host "CUDA $CUDA_VERSION sin soporte directo — se usara PyTorch CPU" -ForegroundColor Yellow
+        Write-Host "CUDA $CUDA_VERSION sin soporte directo - se usara PyTorch CPU" -ForegroundColor Yellow
     }
 }
 
-# ── Crear .venv (siempre fresco para evitar conflictos) ────
+# -- Crear .venv (siempre fresco) --
 if (Test-Path "$PYTHON") {
-    Write-Host "Eliminando venv anterior para empezar fresco ..." -ForegroundColor Yellow
+    Write-Host "Eliminando venv anterior ..." -ForegroundColor Yellow
     Remove-Item -Recurse -Force "$VENV_DIR"
 }
 Write-Host "Creando entorno virtual ..." -ForegroundColor Cyan
 python -m venv "$VENV_DIR"
 
-# ── Instalar ───────────────────────────────────────────────
+# -- Instalar --
 $WHEEL_FILE = Get-ChildItem -Path "$REPO_DIR\dist\*.whl" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
 Write-Host "Instalando dependencias ..." -ForegroundColor Cyan
 
-# 1) Instalar PyTorch con CUDA desde el canal oficial
-#    (PyPI por defecto da CPU-only en Windows)
+# 1) Instalar PyTorch (CUDA desde pytorch.org, CPU desde PyPI)
 if ($TORCH_INDEX) {
     Write-Host "Instalando PyTorch con CUDA desde $TORCH_INDEX ..." -ForegroundColor Cyan
     & $PIP install torch torchvision --index-url $TORCH_INDEX
@@ -73,6 +72,7 @@ if ($TORCH_INDEX) {
     Write-Host "Instalando PyTorch CPU desde PyPI ..." -ForegroundColor Cyan
     & $PIP install torch torchvision
 }
+if ($LASTEXITCODE -ne 0) { Write-Error "Fallo la instalacion de PyTorch"; exit 1 }
 
 # 2) Instalar afora-vc (sin extras de torch para no sobreescribir)
 if ($WHEEL_FILE) {
@@ -82,18 +82,14 @@ if ($WHEEL_FILE) {
     Write-Host "Desde source: pip install .[rtdetr,tracking]" -ForegroundColor White
     & $PIP install "$REPO_DIR[rtdetr,tracking]"
 }
+if ($LASTEXITCODE -ne 0) { Write-Error "Fallo la instalacion de afora-vc"; exit 1 }
 
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Fallo la instalacion"
-    exit 1
-}
-
-# ── Verificar ──────────────────────────────────────────────
+# -- Verificar --
 Write-Host "Verificando instalacion ..." -ForegroundColor Cyan
 & $PYTHON -c "import afora_vc; print('afora_vc OK')"
 & $PYTHON -c "import torch; print(f'PyTorch {torch.__version__}, CUDA {torch.version.cuda}')"
 
-# ── Variables de entorno ───────────────────────────────────
+# -- Variables de entorno --
 Write-Host "Configurando variables de entorno ..." -ForegroundColor Cyan
 
 $SCRIPTS_DIR = "$VENV_DIR\Scripts"
