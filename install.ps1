@@ -3,28 +3,20 @@
     Instala afora-vehicle-counter en un entorno virtual dedicado con deteccion de CUDA.
 .DESCRIPTION
     - Detecta la version de CUDA instalada y selecciona la variante de PyTorch adecuada.
-    - Crea un .venv en %PROGRAMDATA%\afora-vehicle-counter (evita redireccion de Windows Store Python).
-    - Instala el wheel con las dependencias opcionales correspondientes.
+    - Crea un .venv en %%PROGRAMDATA%%\afora-vehicle-counter.
+    - Instala desde el .whl (si existe en dist/) o desde source con pip install .
     - Agrega el directorio Scripts del venv al PATH del usuario (permanente).
     - Establece la variable de entorno AFORA_VC_HOME.
 #>
 
 $ErrorActionPreference = "Stop"
 
-# Usar PROGRAMDATA en vez de LOCALAPPDATA para evitar la redireccion
-# de Windows Store Python sobre %APPDATA% y %LOCALAPPDATA%
 $REPO_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
 $VENV_DIR = "$env:PROGRAMDATA\afora-vehicle-counter"
-$WHEEL_DIR = "$REPO_DIR\dist"
-$WHEEL_FILE = Get-ChildItem -Path "$WHEEL_DIR\*.whl" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-
-if (-not $WHEEL_FILE) {
-    Write-Error "No se encontro ningun .whl en $WHEEL_DIR. Ejecuta 'python -m build --wheel' primero."
-    exit 1
-}
+$PYTHON = "$VENV_DIR\Scripts\python.exe"
+$PIP = "$VENV_DIR\Scripts\pip.exe"
 
 Write-Host "=== Instalacion de afora-vehicle-counter ===" -ForegroundColor Cyan
-Write-Host "Wheel:    $($WHEEL_FILE.Name)" -ForegroundColor White
 Write-Host "Destino:  $VENV_DIR" -ForegroundColor White
 
 # ── Detectar CUDA ──────────────────────────────────────────
@@ -33,7 +25,6 @@ $TORCH_EXTRA = "torch-auto"
 
 try {
     $nvccOut = & "nvcc" "--version" 2>&1
-    # nvcc output is multi-line (array); convertir a string unico para que -match poblaria $Matches
     $nvccText = "$nvccOut"
     if ($nvccText -match "release (\d+\.\d+)") {
         $CUDA_VERSION = $Matches[1]
@@ -56,24 +47,30 @@ if ($CUDA_VERSION) {
 Write-Host "Extra PyTorch: $TORCH_EXTRA" -ForegroundColor Green
 
 # ── Crear .venv ────────────────────────────────────────────
-if (Test-Path "$VENV_DIR\Scripts\python.exe") {
+if (Test-Path "$PYTHON") {
     Write-Host "El .venv ya existe en $VENV_DIR" -ForegroundColor Yellow
 } else {
-    Write-Host "Creando entorno virtual en $VENV_DIR ..." -ForegroundColor Cyan
+    Write-Host "Creando entorno virtual ..." -ForegroundColor Cyan
     python -m venv "$VENV_DIR"
 }
 
-$PYTHON = "$VENV_DIR\Scripts\python.exe"
-$PIP = "$VENV_DIR\Scripts\pip.exe"
+# ── Instalar ───────────────────────────────────────────────
+$WHEEL_FILE = Get-ChildItem -Path "$REPO_DIR\dist\*.whl" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
-# ── Instalar wheel ─────────────────────────────────────────
-Write-Host "Instalando wheel y dependencias ..." -ForegroundColor Cyan
-$EXTRAS = "rtdetr,tracking,$TORCH_EXTRA"
+Write-Host "Instalando dependencias ..." -ForegroundColor Cyan
 & $PIP install --upgrade pip
-& $PIP install "$($WHEEL_FILE.FullName)[$EXTRAS]"
+
+$EXTRAS = "rtdetr,tracking,$TORCH_EXTRA"
+if ($WHEEL_FILE) {
+    Write-Host "Desde wheel: $($WHEEL_FILE.Name)" -ForegroundColor White
+    & $PIP install "$($WHEEL_FILE.FullName)[$EXTRAS]"
+} else {
+    Write-Host "Desde source: pip install .[$EXTRAS]" -ForegroundColor White
+    & $PIP install "$REPO_DIR[$EXTRAS]"
+}
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "Fallo la instalacion del wheel"
+    Write-Error "Fallo la instalacion"
     exit 1
 }
 
@@ -86,7 +83,6 @@ Write-Host "Verificando instalacion ..." -ForegroundColor Cyan
 Write-Host "Configurando variables de entorno ..." -ForegroundColor Cyan
 
 $SCRIPTS_DIR = "$VENV_DIR\Scripts"
-$AFORA_HOME = $VENV_DIR
 
 $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if ($currentPath -notlike "*$SCRIPTS_DIR*") {
@@ -97,12 +93,11 @@ if ($currentPath -notlike "*$SCRIPTS_DIR*") {
     Write-Host "  PATH ya contiene $SCRIPTS_DIR" -ForegroundColor Yellow
 }
 
-[Environment]::SetEnvironmentVariable("AFORA_VC_HOME", $AFORA_HOME, "User")
-Write-Host "  AFORA_VC_HOME = $AFORA_HOME" -ForegroundColor Green
+[Environment]::SetEnvironmentVariable("AFORA_VC_HOME", $VENV_DIR, "User")
+Write-Host "  AFORA_VC_HOME = $VENV_DIR" -ForegroundColor Green
 
 Write-Host ""
 Write-Host "=== Instalacion completada ===" -ForegroundColor Cyan
 Write-Host "Usar: afora --help" -ForegroundColor White
-Write-Host "O:   & `"$PYTHON`" -m afora_vc --help" -ForegroundColor White
 Write-Host ""
 Write-Host "NOTA: Reinicia la terminal para que los cambios de PATH surtan efecto." -ForegroundColor Yellow

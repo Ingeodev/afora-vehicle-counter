@@ -14,5 +14,5 @@ models/*
 !models/.gitkeep
 /output*
 /build/
-/dist/
-*.whl
+/dist/*.tar.gz
+!dist/*.whl
