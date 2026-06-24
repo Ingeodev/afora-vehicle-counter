@@ -4,13 +4,56 @@ Librería multi-backend para detección, tracking y conteo vehicular. Soporta YO
 
 ## Instalación
 
-```bash
-pip install afora-vehicle-counter
+### Windows (recomendado)
 
-# Con el backend que quieras
-pip install "afora-vehicle-counter[yolo]"
-pip install "afora-vehicle-counter[dfine]"
-pip install "afora-vehicle-counter[all]"
+Clonar y ejecutar el instalador. Detecta CUDA automaticamente, crea un entorno virtual dedicado y configura las variables de entorno.
+
+```powershell
+git clone https://github.com/Ingeodev/afora-vehicle-counter.git
+cd afora-vehicle-counter
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+Lo que hace `install.ps1`:
+
+1. Detecta la versión de CUDA via `nvcc` y selecciona el PyTorch adecuado (cu126 para CUDA 13.x)
+2. Crea un `.venv` en `%PROGRAMDATA%\afora-vehicle-counter\`
+3. Instala el `.whl` incluido en `dist/` (o desde source si no hay `.whl`) con extras `rtdetr,tracking,torch-cuXXX`
+4. Agrega `Scripts\` del venv al `PATH` del usuario
+5. Setea la variable de entorno `AFORA_VC_HOME`
+
+Despues de instalar, reiniciar la terminal y usar:
+
+```powershell
+afora --help
+```
+
+### Manual (alternativa)
+
+```bash
+pip install "afora-vehicle-counter[rtdetr,tracking,torch-auto]"
+
+# O con CUDA especifico:
+pip install "afora-vehicle-counter[rtdetr,tracking,torch-cu126]"
+```
+
+### Extras disponibles
+
+| Extra | Instala |
+|---|---|
+| `yolo` | ultralytics (backbone YOLO) |
+| `dfine` | transformers (backbone D-Fine) |
+| `rtdetr` | ultralytics (backbone RT-DETR) |
+| `tracking` | lapx (BotSORT / ByteTrack) |
+| `torch-cu126` | torch 2.6.0 + torchvision 0.21.0 |
+| `torch-cu124` | torch 2.5.1 + torchvision 0.20.1 |
+| `torch-cu121` | torch 2.4.0 + torchvision 0.19.0 |
+| `torch-cu118` | torch 2.4.0 + torchvision 0.19.0 |
+| `torch-auto` | torch>=2.0.0 (desde PyPI con CUDA incluido) |
+
+```bash
+# Todo junto
+pip install "afora-vehicle-counter[rtdetr,tracking,torch-cu126]"
 ```
 
 ## CLI
@@ -21,15 +64,14 @@ pip install "afora-vehicle-counter[all]"
 afora process video.mp4 \
   --zones zonas.json \
   --output ./resultados \
-  --backend yolo \
-  --model yolov8s.pt \
+  --backend rtdetr \
   --device cuda \
-  --batch-size 1
+  --batch-size 16 \
+  --pipeline-mode pipelined
 ```
 
 | Flag | Descripción | Default |
 |---|---|---|
-| `ZONAS` | Ruta al JSON de zonas de conteo (obligatorio) | — |
 | `--zones, -z` | Archivo JSON de zonas | `None` |
 | `--mask, -m` | Máscara de región (PNG) | `None` |
 | `--output, -o` | Carpeta de salida | `./output` |
@@ -38,6 +80,7 @@ afora process video.mp4 \
 | `--device, -d` | Dispositivo: `cpu`, `cuda`, `mps` | auto |
 | `--reduce, -r` | Factor de reducción (2 = half res) | `1` |
 | `--batch-size` | Tamaño de batch (>1 activa batch mode) | `1` |
+| `--pipeline-mode` | `sequential` o `pipelined` | `sequential` |
 | `--strategy` | Estrategia: `box`, `seg` | `box` |
 | `--night-enhance` | Mejora nocturna | `False` |
 | `--deblurring` | Deblurring agresivo | `False` |
@@ -50,16 +93,49 @@ afora process video.mp4 \
 | `--model-config` | YAML con thresholds/clases por clase | — |
 | `--tracker-config` | YAML de configuración del tracker | — |
 
-### Procesar un directorio
+### Procesar lote por YAML (con reanudacion)
 
 ```bash
-afora scan ./videos/ \
-  --output ./resultados \
-  --recursive \
-  --backend yolo
+afora run config.yaml
 ```
 
-Busca automáticamente archivos `*mask*.png` y `*.json` de zonas en cada subdirectorio.
+El archivo YAML define la carpeta de entrada, salida, mascara global, zonas y parámetros de procesamiento:
+
+```yaml
+input: C:\Videos\hik\roosvelt
+output: C:\output\roosvelt
+recursive: true
+
+mask: C:\mask.png
+zones: C:\zones.json
+
+backend: rtdetr
+model: models/rtdetr-l.pt
+pipeline_mode: pipelined
+reduce: 2
+batch_size: 16
+```
+
+#### Reanudacion automatica
+
+El comando `run` crea/lee `progress.csv` en la misma carpeta del YAML. Cada video completado se registra con su ruta, output, tiempo en minutos y detecciones. Si se interrumpe y se vuelve a ejecutar, los videos ya procesados se saltan automaticamente.
+
+```
+input_path,output_path,processing_time_minutes,total_detections
+C:\Videos\roosvelt\video1.mp4,C:\output\roosvelt,26.59,8269
+```
+
+#### Overrides por video
+
+Se pueden sobreescribir parámetros para videos específicos:
+
+```yaml
+overrides:
+  - path: 2026-06-01/video1.mp4
+    mask: C:\mask_especial.png
+    reduce: 1
+    batch_size: 8
+```
 
 ## API
 
@@ -72,8 +148,7 @@ result = process_video(
     video="video.mp4",
     zones="zonas.json",
     output="./output",
-    backend="yolo",
-    model="yolov8s.pt",
+    backend="rtdetr",
     device="cuda",
 )
 
@@ -81,96 +156,6 @@ print(f"Detecciones: {result.total_detections}")
 print(f"Tiempo: {result.processing_time_minutes:.1f} min")
 print(f"Zonas: {result.zone_counts}")
 ```
-
-### Configuración programática
-
-```python
-from afora_vc.application.config import PipelineConfig
-from afora_vc.application.facade import _build_pipeline
-
-config = PipelineConfig()
-config.detector.backend = "yolo"
-config.detector.model_path = "yolov8s.pt"
-config.detector.device = "cuda"
-config.detector.confidence_threshold = 0.5
-config.detector.half_precision = True
-
-config.batch.enabled = True
-config.batch.batch_size = 4
-config.batch.queue_maxsize = 8
-
-config.output.save_video = True
-config.output.save_csv = True
-config.output.draw_zones = True
-
-pipeline = _build_pipeline(config, config.detector.model_path, "box")
-result = pipeline.process_video(video_path="video.mp4", zones_path="zonas.json")
-```
-
-### YAML de configuración
-
-```yaml
-detector:
-  backend: yolo
-  model_path: yolov8s.pt
-  device: cuda
-  confidence_threshold: 0.5
-  half_precision: true
-  class_thresholds:
-    car: 0.6
-    truck: 0.4
-  vehicle_classes:
-    2: car
-    7: truck
-
-tracker:
-  backend: botsort
-  max_age: 30
-  min_hits: 3
-
-video:
-  reduce_factor: 1
-  max_minutes: null
-  skip_rate: 1
-  output_fps: 15.0
-  codec: avc1
-
-output:
-  save_video: true
-  save_csv: true
-  draw_zones: true
-  verbose: true
-
-batch:
-  enabled: false
-  batch_size: 4
-  queue_maxsize: 4
-
-preprocess:
-  mode: none
-```
-
-```python
-from afora_vc.application.config import PipelineConfig
-
-config = PipelineConfig.from_yaml("config.yaml")
-```
-
-### ProcessingResult
-
-`process_video()` devuelve un `ProcessingResult` con:
-
-| Campo | Tipo | Descripción |
-|---|---|---|
-| `video_path` | `str` | Ruta al video original |
-| `output_video_path` | `str\|None` | Ruta al video procesado |
-| `csv_path` | `str\|None` | Ruta al CSV de detecciones |
-| `total_detections` | `int` | Total de detecciones |
-| `zone_counts` | `dict[str, int]` | Conteo por zona |
-| `processing_time_seconds` | `float` | Tiempo total |
-| `processing_time_minutes` | `float` | Tiempo en minutos (property) |
-| `frames_processed` | `int` | Frames procesados |
-| `detection_log` | `list[ZoneEntry]` | Log completo de detecciones |
 
 ### Procesar directorio
 
@@ -181,9 +166,31 @@ results = process_directory(
     root_path="./videos/",
     output_base="./resultados",
     recursive=True,
-    backend="yolo",
+    backend="rtdetr",
 )
 ```
+
+### Procesar desde YAML
+
+```python
+from afora_vc.application.facade import process_from_config
+
+results = process_from_config("config.yaml")
+```
+
+### ProcessingResult
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `video_path` | `str` | Ruta al video original |
+| `output_video_path` | `str\|None` | Ruta al video procesado |
+| `csv_path` | `str\|None` | Ruta al CSV de detecciones |
+| `total_detections` | `int` | Total de detecciones |
+| `zone_counts` | `dict[str, int]` | Conteo por zona |
+| `processing_time_seconds` | `float` | Tiempo total en segundos |
+| `processing_time_minutes` | `float` | Tiempo en minutos (property) |
+| `frames_processed` | `int` | Frames procesados |
+| `detection_log` | `list[ZoneEntry]` | Log completo de detecciones |
 
 ## Backends
 
@@ -200,19 +207,24 @@ results = process_directory(
 | **BotSORT** | `[tracking]` |
 | **ByteTrack** | `[tracking]` |
 
+## Pipeline modes
+
+- **sequential** — procesa frame por frame: leer, detectar, tracker, escribir (bajo throughput, mínimo consumo de memoria)
+- **pipelined** — 4 hilos concurrentes (reader, detector, tracker, writer) con colas. Mayor throughput en GPU. Recomendado para lotes con `batch_size >= 16`.
+
 ## Estructura del proyecto
 
 ```
 afora_vc/
-├── application/       # Orquestación (pipeline, config, facade)
+├── application/       # Orquestación (pipeline, config, facade, batch_config)
 ├── domain/            # Schemas, puertos, servicios, enums
 ├── adapters/          # Implementaciones concretas
 │   ├── detectors/     # YOLO, D-Fine, RT-DETR
 │   ├── trackers/      # BotSORT, ByteTrack
 │   ├── video/         # Lectura/escritura de video
-│   ├── storage/       # Sistema de archivos / S3
+│   ├── storage/       # Sistema de archivos
 │   └── preprocessors/ # NoOp, Deblurring, Night Enhance
 ├── output/            # Visualización, exportación CSV
 ├── cli/               # Interfaz de línea de comandos
-└── utils/             # Utilidades (device, time)
+└── utils/             # Utilidades (device, display, progress, geometry)
 ```
