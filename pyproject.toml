@@ -49,6 +49,11 @@ tracking = [
 ]
 
 # === Variantes de PyTorch por plataforma CUDA ===
+# ATENCION: En Windows, PyPI distribuye solo torch CPU.
+# Para CUDA en Windows usar install.ps1 (instala desde pytorch.org)
+# o ejecutar manualmente:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+# Estos extras funcionan correctamente en Linux. En Windows solo fijan version.
 # Elegir UNA segun el CUDA del sistema:
 #   CUDA 12.6 → torch-cu126
 #   CUDA 12.4 → torch-cu124

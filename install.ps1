@@ -21,7 +21,7 @@ Write-Host "Destino:  $VENV_DIR" -ForegroundColor White
 
 # ── Detectar CUDA ──────────────────────────────────────────
 $CUDA_VERSION = $null
-$TORCH_EXTRA = "torch-auto"
+$TORCH_INDEX = ""  # vacio = PyPI por defecto (CPU en Windows)
 
 try {
     $nvccOut = & "nvcc" "--version" 2>&1
@@ -31,20 +31,25 @@ try {
         Write-Host "CUDA detectado: $CUDA_VERSION" -ForegroundColor Green
     }
 } catch {
-    Write-Host "CUDA no detectado, usando torch-auto" -ForegroundColor Yellow
+    Write-Host "CUDA no detectado — se instalara PyTorch CPU" -ForegroundColor Yellow
 }
 
 if ($CUDA_VERSION) {
-    $TORCH_EXTRA = switch -Wildcard ($CUDA_VERSION) {
-        "12.6*"  { "torch-cu126" }
-        "12.4*"  { "torch-cu124" }
-        "12.1*"  { "torch-cu121" }
-        "11.8*"  { "torch-cu118" }
-        "13*"    { "torch-cu126" }
-        default  { "torch-auto" }
+    $CUDA_SUFFIX = switch -Wildcard ($CUDA_VERSION) {
+        "12.6*"  { "cu126" }
+        "12.4*"  { "cu124" }
+        "12.1*"  { "cu121" }
+        "11.8*"  { "cu118" }
+        "13*"    { "cu126" }   # CUDA 13.x corre con binarios cu126
+        default  { $null }
+    }
+    if ($CUDA_SUFFIX) {
+        $TORCH_INDEX = "https://download.pytorch.org/whl/$CUDA_SUFFIX"
+        Write-Host "Index PyTorch: $TORCH_INDEX" -ForegroundColor Green
+    } else {
+        Write-Host "CUDA $CUDA_VERSION sin soporte directo — se usara PyTorch CPU" -ForegroundColor Yellow
     }
 }
-Write-Host "Extra PyTorch: $TORCH_EXTRA" -ForegroundColor Green
 
 # ── Crear .venv (siempre fresco para evitar conflictos) ────
 if (Test-Path "$PYTHON") {
@@ -59,13 +64,23 @@ $WHEEL_FILE = Get-ChildItem -Path "$REPO_DIR\dist\*.whl" -ErrorAction SilentlyCo
 
 Write-Host "Instalando dependencias ..." -ForegroundColor Cyan
 
-$EXTRAS = "rtdetr,tracking,$TORCH_EXTRA"
+# 1) Instalar PyTorch con CUDA desde el canal oficial
+#    (PyPI por defecto da CPU-only en Windows)
+if ($TORCH_INDEX) {
+    Write-Host "Instalando PyTorch con CUDA desde $TORCH_INDEX ..." -ForegroundColor Cyan
+    & $PIP install torch torchvision --index-url $TORCH_INDEX
+} else {
+    Write-Host "Instalando PyTorch CPU desde PyPI ..." -ForegroundColor Cyan
+    & $PIP install torch torchvision
+}
+
+# 2) Instalar afora-vc (sin extras de torch para no sobreescribir)
 if ($WHEEL_FILE) {
     Write-Host "Desde wheel: $($WHEEL_FILE.Name)" -ForegroundColor White
-    & $PIP install "$($WHEEL_FILE.FullName)[$EXTRAS]"
+    & $PIP install "$($WHEEL_FILE.FullName)[rtdetr,tracking]"
 } else {
-    Write-Host "Desde source: pip install .[$EXTRAS]" -ForegroundColor White
-    & $PIP install "$REPO_DIR[$EXTRAS]"
+    Write-Host "Desde source: pip install .[rtdetr,tracking]" -ForegroundColor White
+    & $PIP install "$REPO_DIR[rtdetr,tracking]"
 }
 
 if ($LASTEXITCODE -ne 0) {
