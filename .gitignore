@@ -13,3 +13,6 @@ tests/assets/.gitkeep
 models/*
 !models/.gitkeep
 /output*
+/build/
+/dist/
+*.whl

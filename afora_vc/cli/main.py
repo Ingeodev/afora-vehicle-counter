@@ -1,6 +1,7 @@
 import sys
 
-from ..application.facade import process_video, process_directory
+from ..application.facade import process_video, process_directory, process_from_config
+from ..application.batch_config import BatchConfig
 from ..domain.exceptions import AforosError
 from ..utils.display import DisplayManager
 
@@ -42,6 +43,11 @@ def main():
     p.add_argument("--profile", action="store_true", help="Habilitar profiling por paso")
     p.add_argument("--audit", action="store_true", help="Auditar detecciones por etapa del pipeline")
 
+    # run (batch config)
+    r = subparsers.add_parser("run", help="Procesar desde archivo de configuracion YAML")
+    r.add_argument("config", help="Ruta al archivo .yaml de configuracion")
+    r.add_argument("--quiet", "-q", action="store_true", help="Modo silencioso")
+
     # scan
     s = subparsers.add_parser("scan", help="Procesar directorio de videos")
     s.add_argument("directory", help="Directorio raiz")
@@ -79,6 +85,8 @@ def main():
             return _cmd_process(args)
         elif args.command == "scan":
             return _cmd_scan(args)
+        elif args.command == "run":
+            return _cmd_run(args)
     except AforosError as e:
         _display.show_error(str(e), context="AforosError")
         return 1
@@ -122,17 +130,25 @@ def _cmd_process(args):
     return 0
 
 
+def _cmd_run(args):
+    results = process_from_config(args.config)
+    if not args.quiet:
+        total = sum(r.total_detections for r in results)
+        print(f"Completados {len(results)} videos, {total} detecciones totales")
+    return 0
+
+
 def _cmd_scan(args):
     results = process_directory(
         root_path=args.directory,
         output_base=args.output,
         recursive=args.recursive,
+        global_mask=args.mask,
+        global_zones=args.zones,
         device=args.device,
         model=args.model,
         reduce=args.reduce,
         max_minutes=args.max_minutes,
-        zones=args.zones,
-        mask=args.mask,
         strategy=args.strategy,
         night_enhance=args.night_enhance,
         model_config=args.model_config,
@@ -148,7 +164,7 @@ def _cmd_scan(args):
 
     if not args.quiet:
         total = sum(r.total_detections for r in results)
-        print(f"\n✅ Completado: {len(results)} videos, {total} detecciones")
+        print(f"Completados {len(results)} videos, {total} detecciones totales")
     return 0
 
 

@@ -72,7 +72,6 @@ dev = [
 afora = "afora_vc.cli.main:main"
 
 [tool.setuptools.packages.find]
-where = ["afora_vc"]
 include = ["afora_vc*"]
 
 [tool.setuptools.package-data]

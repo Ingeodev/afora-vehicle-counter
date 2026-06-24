@@ -74,9 +74,11 @@ def _update_progress(
         elapsed = time.time() - start_time
         on_progress(frames_processed, max_frames, elapsed)
     if frames_processed % 10 == 0:
-        extra = ""
+        elapsed = time.time() - start_time
+        current_fps = frames_processed / elapsed if elapsed > 0 else 0
+        extra = f"fps={current_fps:.1f}"
         if zone_manager:
-            extra = f"detections={zone_manager.get_log_count()}"
+            extra += f" det={zone_manager.get_log_count()}"
         display.update_progress(extra=extra)
 
 
@@ -502,18 +504,17 @@ class Pipeline:
             # Export CSV
             csv_path = None
             if out_cfg.save_csv and self.zone_manager:
-                csv_dir = f"{output_folder}/csv"
-                self.writer.makedirs(csv_dir)
+                csv_base = _os.path.splitext(video_name)[0]
                 detection_log = self.zone_manager.get_detection_log()
                 zone_counts_map = self.zone_manager.get_zone_counts()
 
-                det_path = f"{csv_dir}/detections.csv"
+                det_path = f"{output_folder}/{csv_base}_detections.csv"
                 self.csv_exporter.export_detections(detection_log, det_path)
 
-                summary_path = f"{csv_dir}/summary.csv"
+                summary_path = f"{output_folder}/{csv_base}_summary.csv"
                 self.csv_exporter.export_summary(zone_counts_map, summary_path)
 
-                types_path = f"{csv_dir}/vehicle_types.csv"
+                types_path = f"{output_folder}/{csv_base}_vehicle_types.csv"
                 self.csv_exporter.export_vehicle_types(detection_log, types_path)
 
                 csv_path = det_path

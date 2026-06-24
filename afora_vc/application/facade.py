@@ -1,5 +1,6 @@
+import os
 from pathlib import Path
-from typing import Optional, Literal
+from typing import Any, Optional, Literal
 
 import yaml
 
@@ -13,10 +14,13 @@ from ..domain.exceptions import (
 )
 from ..domain.enums import DeviceType, DetectorBackend, TrackerBackend, PreprocessMode, PipelineMode
 from ..adapters import DetectorRegistry, TrackerRegistry
+from ..adapters.storage.local import LocalStorageReader
 from ..utils.display import DisplayManager
+from ..utils.progress import ProgressTracker
 from .config import PipelineConfig
 from .pipeline import Pipeline
 from .pipelined_pipeline import PipelinedPipeline
+from .batch_config import BatchConfig, VideoOverride
 
 
 def _build_pipeline(
@@ -201,39 +205,69 @@ def process_directory(
     root_path: str,
     output_base: str | None = None,
     recursive: bool = True,
+    global_mask: str | None = None,
+    global_zones: str | None = None,
+    overrides: dict[str, dict[str, Any]] | None = None,
+    skip_paths: set[str] | None = None,
+    progress_tracker: ProgressTracker | None = None,
     **kwargs,
 ) -> list[ProcessingResult]:
-    from ..adapters.storage.local import LocalStorageReader
-
     reader = LocalStorageReader()
     results: list[ProcessingResult] = []
+    overrides = overrides or {}
+    skip_paths = skip_paths or set()
 
     scan_result = _scan_directory(root_path, reader, recursive)
 
     quiet = kwargs.get("quiet", False)
     _display = DisplayManager(verbose=not quiet, quiet=quiet)
     total_videos = len(scan_result)
+    pending = [e for e in scan_result if e["path"] not in skip_paths]
+    skipped_count = total_videos - len(pending)
 
-    _display.show_info(f"[bold cyan]📁 Escaneando: {root_path}[/] — [bold]{total_videos}[/] videos encontrados")
+    if skipped_count:
+        _display.show_info(f"Procesados previamente: {skipped_count} videos (saltados)")
+    _display.show_info(f"Escaneando: {root_path} -- {len(pending)} pendientes de {total_videos}")
 
-    if total_videos == 0:
-        _display.show_warning("No se encontraron videos para procesar")
+    if not pending:
+        _display.show_success("Todos los videos ya fueron procesados")
         return results
 
-    _display.start_scan(total_videos=total_videos)
+    _display.start_scan(total_videos=len(pending))
 
-    for i, video_info in enumerate(scan_result, 1):
-        video_name = video_info["path"].split("/")[-1].split("\\")[-1]
-        _display.start_video_progress(total=100, description=f"[{i}/{total_videos}] {video_name}")
+    for i, entry in enumerate(pending, 1):
+        video_path = entry["path"]
+        rel_path = entry["rel_path"]
+        video_name = entry["name"]
+        _display.start_video_progress(total=100, description=f"[{i}/{len(pending)}] {video_name}")
 
-        output_folder = output_base or video_info.get("output_folder", "./output")
+        # Preserve directory structure in output
+        if output_base:
+            out_dir = os.path.join(output_base, os.path.dirname(rel_path)) if os.path.dirname(rel_path) else output_base
+        else:
+            out_dir = entry["output_folder"]
+        os.makedirs(out_dir, exist_ok=True)
+
+        # Resolve mask and zones: override > global > auto-detected
+        ov = overrides.get(rel_path.replace("\\", "/"), {}) if overrides else {}
+        final_mask = ov.get("mask") or global_mask or entry.get("mask_path")
+        final_zones = ov.get("zones") or global_zones or entry.get("zones_path")
+
+        # Build per-video kwargs with overrides merged on top
+        video_kwargs = dict(kwargs)
+        for k in ("reduce", "batch_size", "pipeline_mode", "model", "backend",
+                  "tracker_backend", "device", "strategy", "max_minutes",
+                  "night_enhance", "deblurring", "no_video", "output_name"):
+            if k in ov and ov[k] is not None:
+                video_kwargs[k] = ov[k]
+
         try:
             result = process_video(
-                video=video_info["path"],
-                zones=video_info.get("zones_path"),
-                mask=video_info.get("mask_path"),
-                output=output_folder,
-                **{k: v for k, v in kwargs.items() if k in [
+                video=video_path,
+                zones=final_zones,
+                mask=final_mask,
+                output=out_dir,
+                **{k: v for k, v in video_kwargs.items() if k in [
                     "base_time", "date", "device", "model", "reduce",
                     "max_minutes", "strategy", "night_enhance", "model_config",
                     "deblurring", "no_video", "quiet", "backend",
@@ -243,6 +277,13 @@ def process_directory(
                 ]},
             )
             results.append(result)
+            if progress_tracker is not None:
+                progress_tracker.mark_completed(
+                    video_path=video_path,
+                    output_path=out_dir,
+                    processing_time_seconds=result.processing_time_seconds,
+                    total_detections=result.total_detections,
+                )
         except Exception as e:
             _display.show_error(str(e), context=video_name)
         finally:
@@ -252,9 +293,57 @@ def process_directory(
     _display.stop_scan()
 
     total_detections = sum(r.total_detections for r in results)
-    _display.show_success(f"Procesados {total_videos} videos, {total_detections} detecciones totales")
+    all_count = len(pending)
+    _display.show_success(f"Procesados {all_count} videos, {total_detections} detecciones totales")
 
     return results
+
+
+def process_from_config(config: BatchConfig | str) -> list[ProcessingResult]:
+    config_path: str | None = None
+    if isinstance(config, str):
+        config_path = config
+        config = BatchConfig.from_yaml(config)
+    else:
+        config_path = getattr(config, "_source_path", None)
+
+    overrides_dict: dict[str, dict[str, Any]] = {}
+    for ov in config.overrides:
+        d = {k: v for k, v in vars(ov).items() if k != "path" and v is not None}
+        overrides_dict[ov.path.replace("\\", "/")] = d
+
+    progress_tracker: ProgressTracker | None = None
+    skip_paths: set[str] = set()
+    if config_path:
+        config_dir = os.path.dirname(os.path.abspath(config_path))
+        progress_path = os.path.join(config_dir, "progress.csv")
+        progress_tracker = ProgressTracker(progress_path)
+        skip_paths = progress_tracker.completed_paths
+
+    return process_directory(
+        root_path=config.input,
+        output_base=config.output,
+        recursive=config.recursive,
+        global_mask=config.mask,
+        global_zones=config.zones,
+        overrides=overrides_dict,
+        skip_paths=skip_paths,
+        progress_tracker=progress_tracker,
+        device=config.device,
+        model=config.model,
+        reduce=config.reduce,
+        max_minutes=config.max_minutes,
+        strategy=config.strategy,
+        night_enhance=config.night_enhance,
+        deblurring=config.deblurring,
+        no_video=config.no_video,
+        quiet=config.quiet,
+        backend=config.backend,
+        tracker_backend=config.tracker,
+        batch_size=config.batch_size,
+        output_name=config.output_name,
+        pipeline_mode=config.pipeline_mode,
+    )
 
 
 def _scan_directory(
@@ -262,7 +351,7 @@ def _scan_directory(
     reader: "LocalStorageReader",
     recursive: bool = True,
 ) -> list[dict]:
-    from ..adapters.storage.local import LocalStorageReader
+    from pathlib import Path
 
     entries = []
     paths_to_scan = [root_path]
@@ -283,22 +372,20 @@ def _scan_directory(
 
         for fi in files:
             if fi.extension.lower() in {".mp4", ".avi", ".mov", ".mkv"}:
-                import os
+                rel = os.path.relpath(fi.path, root_path)
                 entries.append({
                     "path": fi.path,
+                    "rel_path": rel,
+                    "name": fi.name,
                     "mask_path": mask_path,
                     "zones_path": zones_path,
                     "output_folder": os.path.join(root_path, "output"),
                 })
 
         if recursive:
-            dirs = reader.list_files(current, "*")
-            for d in dirs:
-                if not d.path.endswith((".mp4", ".avi", ".mov", ".mkv", ".png", ".jpg", ".jpeg", ".json")):
-                    # check if it's actually a directory
-                    full_path = reader.get_video_path(d.path)
-                    import os as _os
-                    if _os.path.isdir(full_path):
-                        paths_to_scan.append(d.path)
+            dir_entries = [e for e in os.scandir(current) if e.is_dir()]
+            for d in dir_entries:
+                paths_to_scan.append(d.path)
 
+    entries.sort(key=lambda e: e["name"])
     return entries
