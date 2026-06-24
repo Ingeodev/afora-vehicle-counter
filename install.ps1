@@ -46,19 +46,18 @@ if ($CUDA_VERSION) {
 }
 Write-Host "Extra PyTorch: $TORCH_EXTRA" -ForegroundColor Green
 
-# ── Crear .venv ────────────────────────────────────────────
+# ── Crear .venv (siempre fresco para evitar conflictos) ────
 if (Test-Path "$PYTHON") {
-    Write-Host "El .venv ya existe en $VENV_DIR" -ForegroundColor Yellow
-} else {
-    Write-Host "Creando entorno virtual ..." -ForegroundColor Cyan
-    python -m venv "$VENV_DIR"
+    Write-Host "Eliminando venv anterior para empezar fresco ..." -ForegroundColor Yellow
+    Remove-Item -Recurse -Force "$VENV_DIR"
 }
+Write-Host "Creando entorno virtual ..." -ForegroundColor Cyan
+python -m venv "$VENV_DIR"
 
 # ── Instalar ───────────────────────────────────────────────
 $WHEEL_FILE = Get-ChildItem -Path "$REPO_DIR\dist\*.whl" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
 Write-Host "Instalando dependencias ..." -ForegroundColor Cyan
-& $PIP install --upgrade pip
 
 $EXTRAS = "rtdetr,tracking,$TORCH_EXTRA"
 if ($WHEEL_FILE) {
