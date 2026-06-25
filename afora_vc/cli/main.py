@@ -7,6 +7,7 @@ from ..domain.exceptions import AforosError
 from ..domain.counting.services import VehicleClassesResolver
 from ..application.count_pipeline import GroupPipeline, export_chart
 from ..output.count_exporter import DefaultFlowExporter
+from ..utilities.video_sorter import sort_videos_by_date, rollback_sort
 from ..utils.display import DisplayManager
 
 
@@ -45,12 +46,23 @@ def main():
     p.add_argument("--tracker-config", type=str, help="YAML de config del tracker")
     p.add_argument("--pipeline-mode", default="sequential", choices=["sequential", "pipelined"], help="Modo de pipeline")
     p.add_argument("--profile", action="store_true", help="Habilitar profiling por paso")
+    p.add_argument("--profile-path", type=str, help="Ruta del CSV de profiling")
+    p.add_argument("--queue-maxsize", type=int, default=4, help="Tamano maximo de cola (modo pipelined)")
     p.add_argument("--audit", action="store_true", help="Auditar detecciones por etapa del pipeline")
 
     # run (batch config)
     r = subparsers.add_parser("run", help="Procesar desde archivo de configuracion YAML")
     r.add_argument("config", help="Ruta al archivo .yaml de configuracion")
     r.add_argument("--quiet", "-q", action="store_true", help="Modo silencioso")
+    r.add_argument("--graph", choices=["none", "image", "web"], help="Tipo de grafico (sorescribe el YAML)")
+
+    # utils
+    utils_parser = subparsers.add_parser("utils", help="Utility tools")
+    utils_sub = utils_parser.add_subparsers(dest="util_cmd", help="Utility command")
+
+    gbd = utils_sub.add_parser("group-by-date", help="Group video files into date-based subdirectories")
+    gbd.add_argument("path", help="Folder containing video files")
+    gbd.add_argument("--rollback", "-r", action="store_true", help="Undo a previous group-by-date operation")
 
     # group
     g = subparsers.add_parser("group", help="Agrupar detecciones de una carpeta procesada")
@@ -83,6 +95,11 @@ def main():
     s.add_argument("--batch-size", type=int, default=1)
     s.add_argument("--output-name", type=str, help="Nombre del video de salida")
     s.add_argument("--tracker-config", type=str)
+    s.add_argument("--base-time", "-t", default="00:00", help="Hora base (HH:MM)")
+    s.add_argument("--queue-maxsize", type=int, default=4, help="Tamano maximo de cola (modo pipelined)")
+    s.add_argument("--profile", action="store_true", help="Habilitar profiling por paso")
+    s.add_argument("--profile-path", type=str, help="Ruta del CSV de profiling")
+    s.add_argument("--audit", action="store_true", help="Auditar detecciones por etapa del pipeline")
 
     args = parser.parse_args()
 
@@ -95,6 +112,8 @@ def main():
     try:
         if args.command == "process":
             return _cmd_process(args)
+        elif args.command == "utils":
+            return _cmd_utils(args)
         elif args.command == "scan":
             return _cmd_scan(args)
         elif args.command == "group":
@@ -136,11 +155,28 @@ def _cmd_process(args):
         tracker_config=args.tracker_config,
         pipeline_mode=args.pipeline_mode,
         profile=args.profile,
+        profile_path=args.profile_path,
+        queue_maxsize=args.queue_maxsize,
         audit=args.audit,
     )
 
     if not args.quiet:
         print(f"\n✅ Completado: {result.total_detections} detecciones")
+    return 0
+
+
+def _cmd_utils(args):
+    if args.util_cmd == "group-by-date":
+        if args.rollback:
+            result = rollback_sort(args.path)
+        else:
+            result = sort_videos_by_date(args.path)
+        total = len(result.moved)
+        skipped = len(result.skipped)
+        errs = len(result.errors)
+        if not getattr(args, "quiet", False) or errs:
+            print(f"\nProcessed: {total} moved, {skipped} skipped, {errs} errors")
+        return 0 if errs == 0 else 1
     return 0
 
 
@@ -178,10 +214,16 @@ def _cmd_group(args):
 
 
 def _cmd_run(args):
-    results = process_from_config(args.config)
+    config_obj = BatchConfig.from_yaml(args.config)
+    if args.graph is not None and config_obj.count is not None:
+        import dataclasses
+        config_obj.count = dataclasses.replace(config_obj.count, graph=args.graph)
+    results = process_from_config(config_obj)
     if not args.quiet:
         total = sum(r.total_detections for r in results)
         print(f"Completados {len(results)} videos, {total} detecciones totales")
+        if config_obj.count and config_obj.count.graph != "none":
+            print(f"Grafico: {config_obj.count.graph}")
     return 0
 
 
@@ -207,6 +249,11 @@ def _cmd_scan(args):
         output_name=args.output_name,
         batch_size=args.batch_size,
         tracker_config=args.tracker_config,
+        base_time=args.base_time,
+        queue_maxsize=args.queue_maxsize,
+        profile=args.profile,
+        profile_path=args.profile_path,
+        audit=args.audit,
     )
 
     if not args.quiet:

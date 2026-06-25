@@ -50,7 +50,7 @@ class CountConfig:
     """Configuracion completa de la seccion count: del YAML."""
     interval_minutes: int
     groups: list[CountGroupConfig]
-    graph: str = "none"  # "none" | "image" | "web"
+    graph: str = "web"  # "none" | "image" | "web"
 
 
 @dataclass

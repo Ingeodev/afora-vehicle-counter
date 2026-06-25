@@ -337,7 +337,7 @@ def _run_count_pipeline(count_config, out_dir, dir_key, resolver):
     data = pipeline.execute(out_dir, output_dir=out_dir)
     if data:
         exporter = DefaultFlowExporter()
-        out_path = os.path.join(out_dir, f"{dir_key.replace(os.sep, '_')}_aggregated_counts.csv")
+        out_path = os.path.join(out_dir, "aggregated_counts.csv")
         exporter.write(data, count_config, resolver or VehicleClassesResolver(), out_path)
         export_chart(data, count_config, resolver or VehicleClassesResolver(), out_dir, date=dir_key)
 
@@ -363,10 +363,7 @@ def process_from_config(config: BatchConfig | str) -> list[ProcessingResult]:
         progress_tracker = ProgressTracker(progress_path)
         skip_paths = progress_tracker.completed_paths
 
-    resolver = VehicleClassesResolver()
-    model_cfg = getattr(config, "model_config", None)
-    if model_cfg:
-        resolver = VehicleClassesResolver.from_model_config(model_cfg)
+    resolver = VehicleClassesResolver.from_model_config(config.model_config)
 
     return process_directory(
         root_path=config.input,
@@ -393,6 +390,14 @@ def process_from_config(config: BatchConfig | str) -> list[ProcessingResult]:
         batch_size=config.batch_size,
         output_name=config.output_name,
         pipeline_mode=config.pipeline_mode,
+        model_config=config.model_config,
+        tracker_config=config.tracker_config,
+        base_time=config.base_time,
+        date=config.date,
+        queue_maxsize=config.queue_maxsize,
+        profile=config.profile,
+        profile_path=config.profile_path,
+        audit=config.audit,
     )
 
 

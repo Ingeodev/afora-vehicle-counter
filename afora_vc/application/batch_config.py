@@ -27,6 +27,14 @@ class VideoOverride:
     deblurring: bool | None = None
     no_video: bool | None = None
     output_name: str | None = None
+    model_config: str | None = None
+    tracker_config: str | None = None
+    base_time: str | None = None
+    date: str | None = None
+    queue_maxsize: int | None = None
+    profile: bool | None = None
+    profile_path: str | None = None
+    audit: bool | None = None
 
 
 @dataclass
@@ -51,6 +59,15 @@ class BatchConfig:
     no_video: bool = False
     output_name: str | None = None
     quiet: bool = False
+
+    model_config: str | None = None
+    tracker_config: str | None = None
+    base_time: str = "00:00"
+    date: str = "2025-01-01"
+    queue_maxsize: int = 4
+    profile: bool = False
+    profile_path: str | None = None
+    audit: bool = False
 
     overrides: list[VideoOverride] = field(default_factory=list)
     count: CountConfig | None = None
@@ -94,10 +111,10 @@ class BatchConfig:
                 name=str(g.get("name", "")),
                 include=include,
                 exclude=exclude,
-                access=str(g.get("acess", "")),
+                access=str(g.get("access", "")),
                 zone_paths=[[str(z) for z in zp] for zp in g.get("zones", [])],
             ))
-        graph = str(data.get("graph", "none")).lower()
+        graph = str(data.get("graph", "web")).lower()
         return CountConfig(interval_minutes=interval, groups=groups, graph=graph)
 
     def get_override(self, video_rel_path: str) -> VideoOverride | None:
