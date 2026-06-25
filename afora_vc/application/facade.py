@@ -1,4 +1,6 @@
 import os
+import threading
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional, Literal
 
@@ -13,6 +15,7 @@ from ..domain.exceptions import (
     BackendNotRegisteredError,
 )
 from ..domain.enums import DeviceType, DetectorBackend, TrackerBackend, PreprocessMode, PipelineMode
+from ..domain.counting.services import VehicleClassesResolver
 from ..adapters import DetectorRegistry, TrackerRegistry
 from ..adapters.storage.local import LocalStorageReader
 from ..utils.display import DisplayManager
@@ -210,6 +213,8 @@ def process_directory(
     overrides: dict[str, dict[str, Any]] | None = None,
     skip_paths: set[str] | None = None,
     progress_tracker: ProgressTracker | None = None,
+    count_config=None,
+    count_resolver: VehicleClassesResolver | None = None,
     **kwargs,
 ) -> list[ProcessingResult]:
     reader = LocalStorageReader()
@@ -233,12 +238,22 @@ def process_directory(
         _display.show_success("Todos los videos ya fueron procesados")
         return results
 
+    # Agrupar pendientes por subdirectorio
+    dir_groups: dict[str, list[dict]] = defaultdict(list)
+    for entry in pending:
+        dir_key = os.path.dirname(entry["rel_path"]) or "__root__"
+        dir_groups[dir_key].append(entry)
+
+    completed_counts: dict[str, int] = defaultdict(int)
+    count_threads: list[threading.Thread] = []
+
     _display.start_scan(total_videos=len(pending))
 
     for i, entry in enumerate(pending, 1):
         video_path = entry["path"]
         rel_path = entry["rel_path"]
         video_name = entry["name"]
+        dir_key = os.path.dirname(rel_path) or "__root__"
         _display.start_video_progress(total=100, description=f"[{i}/{len(pending)}] {video_name}")
 
         # Preserve directory structure in output
@@ -290,13 +305,41 @@ def process_directory(
             _display.stop_video_progress()
             _display.update_scan(advance=1)
 
+        # Verificar si este subdirectorio completo su procesamiento
+        completed_counts[dir_key] += 1
+        if count_config and dir_key != "__root__" and completed_counts[dir_key] == len(dir_groups[dir_key]):
+            from .count_pipeline import GroupPipeline
+            from ..output.count_exporter import DefaultFlowExporter
+            t = threading.Thread(
+                target=_run_count_pipeline,
+                args=(count_config, out_dir, dir_key, count_resolver),
+                daemon=True,
+            )
+            t.start()
+            count_threads.append(t)
+
     _display.stop_scan()
 
     total_detections = sum(r.total_detections for r in results)
     all_count = len(pending)
     _display.show_success(f"Procesados {all_count} videos, {total_detections} detecciones totales")
 
+    for t in count_threads:
+        t.join()
+
     return results
+
+
+def _run_count_pipeline(count_config, out_dir, dir_key, resolver):
+    from .count_pipeline import GroupPipeline, export_chart
+    from ..output.count_exporter import DefaultFlowExporter
+    pipeline = GroupPipeline(count_config, resolver=resolver)
+    data = pipeline.execute(out_dir, output_dir=out_dir)
+    if data:
+        exporter = DefaultFlowExporter()
+        out_path = os.path.join(out_dir, f"{dir_key.replace(os.sep, '_')}_aggregated_counts.csv")
+        exporter.write(data, count_config, resolver or VehicleClassesResolver(), out_path)
+        export_chart(data, count_config, resolver or VehicleClassesResolver(), out_dir, date=dir_key)
 
 
 def process_from_config(config: BatchConfig | str) -> list[ProcessingResult]:
@@ -320,6 +363,11 @@ def process_from_config(config: BatchConfig | str) -> list[ProcessingResult]:
         progress_tracker = ProgressTracker(progress_path)
         skip_paths = progress_tracker.completed_paths
 
+    resolver = VehicleClassesResolver()
+    model_cfg = getattr(config, "model_config", None)
+    if model_cfg:
+        resolver = VehicleClassesResolver.from_model_config(model_cfg)
+
     return process_directory(
         root_path=config.input,
         output_base=config.output,
@@ -329,6 +377,8 @@ def process_from_config(config: BatchConfig | str) -> list[ProcessingResult]:
         overrides=overrides_dict,
         skip_paths=skip_paths,
         progress_tracker=progress_tracker,
+        count_config=config.count,
+        count_resolver=resolver,
         device=config.device,
         model=config.model,
         reduce=config.reduce,

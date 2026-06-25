@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import yaml
+
+from ..domain.counting.entities import CountConfig, CountGroupConfig
 
 
 @dataclass
@@ -51,6 +53,7 @@ class BatchConfig:
     quiet: bool = False
 
     overrides: list[VideoOverride] = field(default_factory=list)
+    count: CountConfig | None = None
 
     @classmethod
     def from_yaml(cls, path: str) -> BatchConfig:
@@ -67,7 +70,35 @@ class BatchConfig:
                 overrides.append(VideoOverride(path=item))
             elif isinstance(item, dict):
                 overrides.append(VideoOverride(**item))
-        return cls(overrides=overrides, **data)
+
+        count_data = data.pop("count", None)
+        count_config: CountConfig | None = None
+        if count_data is not None:
+            count_config = cls._parse_count(count_data)
+
+        return cls(overrides=overrides, count=count_config, **data)
+
+    @staticmethod
+    def _parse_count(data: dict[str, Any]) -> CountConfig:
+        interval = int(data.get("interval", 15))
+        raw_groups = data.get("groups", [])
+        groups = []
+        for g in raw_groups:
+            include: dict[int, str] | Literal["all"] = g.get("include", "all")
+            exclude: dict[int, str] | Literal["none"] = g.get("exclude", "none")
+            if isinstance(include, dict):
+                include = {int(k): str(v) for k, v in include.items()}
+            if isinstance(exclude, dict):
+                exclude = {int(k): str(v) for k, v in exclude.items()}
+            groups.append(CountGroupConfig(
+                name=str(g.get("name", "")),
+                include=include,
+                exclude=exclude,
+                access=str(g.get("acess", "")),
+                zone_paths=[[str(z) for z in zp] for zp in g.get("zones", [])],
+            ))
+        graph = str(data.get("graph", "none")).lower()
+        return CountConfig(interval_minutes=interval, groups=groups, graph=graph)
 
     def get_override(self, video_rel_path: str) -> VideoOverride | None:
         norm = video_rel_path.replace("\\", "/")

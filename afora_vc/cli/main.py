@@ -1,8 +1,12 @@
+import os
 import sys
 
 from ..application.facade import process_video, process_directory, process_from_config
 from ..application.batch_config import BatchConfig
 from ..domain.exceptions import AforosError
+from ..domain.counting.services import VehicleClassesResolver
+from ..application.count_pipeline import GroupPipeline, export_chart
+from ..output.count_exporter import DefaultFlowExporter
 from ..utils.display import DisplayManager
 
 
@@ -48,6 +52,14 @@ def main():
     r.add_argument("config", help="Ruta al archivo .yaml de configuracion")
     r.add_argument("--quiet", "-q", action="store_true", help="Modo silencioso")
 
+    # group
+    g = subparsers.add_parser("group", help="Agrupar detecciones de una carpeta procesada")
+    g.add_argument("--folder", "-f", help="Carpeta con detections.csv")
+    g.add_argument("--config", "-c", required=True, help="YAML con configuracion (usa seccion count:)")
+    g.add_argument("--model-config", help="YAML con config del modelo (vehicle_classes)")
+    g.add_argument("--output", "-o", help="Carpeta de salida (por defecto: la misma --folder)")
+    g.add_argument("--graph", choices=["none", "image", "web"], help="Tipo de grafico (sorescribe el YAML)")
+
     # scan
     s = subparsers.add_parser("scan", help="Procesar directorio de videos")
     s.add_argument("directory", help="Directorio raiz")
@@ -85,6 +97,8 @@ def main():
             return _cmd_process(args)
         elif args.command == "scan":
             return _cmd_scan(args)
+        elif args.command == "group":
+            return _cmd_group(args)
         elif args.command == "run":
             return _cmd_run(args)
     except AforosError as e:
@@ -127,6 +141,39 @@ def _cmd_process(args):
 
     if not args.quiet:
         print(f"\n✅ Completado: {result.total_detections} detecciones")
+    return 0
+
+
+def _cmd_group(args):
+    batch_cfg = BatchConfig.from_yaml(args.config)
+    if batch_cfg.count is None:
+        print("Error: El YAML no tiene seccion 'count:'")
+        return 1
+
+    # CLI --graph sobreescribe el YAML
+    if args.graph is not None:
+        import dataclasses
+        batch_cfg.count = dataclasses.replace(batch_cfg.count, graph=args.graph)
+
+    folder = args.folder or batch_cfg.output
+    out_dir = args.output or folder
+    resolver = VehicleClassesResolver.from_model_config(args.model_config)
+
+    pipeline = GroupPipeline(batch_cfg.count, resolver=resolver)
+    data = pipeline.execute(folder, output_dir=out_dir)
+
+    exporter = DefaultFlowExporter()
+    out_path = os.path.join(out_dir, "aggregated_counts.csv")
+    exporter.write(data, batch_cfg.count, resolver, out_path)
+
+    # Fecha desde el nombre de la carpeta o el config
+    date = os.path.basename(os.path.normpath(folder))
+    chart_path = export_chart(data, batch_cfg.count, resolver, out_dir, date=date)
+
+    if not getattr(args, "quiet", False):
+        print(f"CSV: {out_path}")
+        if chart_path:
+            print(f"Grafico: {chart_path}")
     return 0
 
 
