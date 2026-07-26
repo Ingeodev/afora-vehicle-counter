@@ -215,6 +215,7 @@ def _cmd_group(args):
 
 def _cmd_run(args):
     config_obj = BatchConfig.from_yaml(args.config)
+    config_obj._source_path = os.path.abspath(args.config)
     if args.graph is not None and config_obj.count is not None:
         import dataclasses
         config_obj.count = dataclasses.replace(config_obj.count, graph=args.graph)
