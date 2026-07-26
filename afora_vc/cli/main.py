@@ -1,7 +1,7 @@
 import os
 import sys
 
-from ..application.facade import process_video, process_directory, process_from_config
+from ..application.facade import process_video, process_directory, process_from_config, check_config
 from ..application.batch_config import BatchConfig
 from ..domain.exceptions import AforosError
 from ..domain.counting.services import VehicleClassesResolver
@@ -72,6 +72,10 @@ def main():
     g.add_argument("--output", "-o", help="Carpeta de salida (por defecto: la misma --folder)")
     g.add_argument("--graph", choices=["none", "image", "web"], help="Tipo de grafico (sorescribe el YAML)")
 
+    # check
+    ck = subparsers.add_parser("check", help="Previsualizar configuracion por video sin procesar")
+    ck.add_argument("config", help="Ruta al archivo .yaml de configuracion")
+
     # scan
     s = subparsers.add_parser("scan", help="Procesar directorio de videos")
     s.add_argument("directory", help="Directorio raiz")
@@ -118,6 +122,8 @@ def main():
             return _cmd_scan(args)
         elif args.command == "group":
             return _cmd_group(args)
+        elif args.command == "check":
+            return _cmd_check(args)
         elif args.command == "run":
             return _cmd_run(args)
     except AforosError as e:
@@ -225,6 +231,11 @@ def _cmd_run(args):
         print(f"Completados {len(results)} videos, {total} detecciones totales")
         if config_obj.count and config_obj.count.graph != "none":
             print(f"Grafico: {config_obj.count.graph}")
+    return 0
+
+
+def _cmd_check(args):
+    check_config(args.config)
     return 0
 
 

@@ -265,6 +265,9 @@ def process_directory(
 
         # Resolve mask and zones: override > global > auto-detected
         ov = overrides.get(rel_path.replace("\\", "/"), {}) if overrides else {}
+        if not ov:
+            abs_path = os.path.abspath(entry["path"]).replace("\\", "/")
+            ov = overrides.get(abs_path, {})
         final_mask = ov.get("mask") or global_mask or entry.get("mask_path")
         final_zones = ov.get("zones") or global_zones or entry.get("zones_path")
 
@@ -350,10 +353,17 @@ def process_from_config(config: BatchConfig | str) -> list[ProcessingResult]:
     else:
         config_path = getattr(config, "_source_path", None)
 
+    input_abs = os.path.abspath(config.input)
     overrides_dict: dict[str, dict[str, Any]] = {}
     for ov in config.overrides:
         d = {k: v for k, v in vars(ov).items() if k != "path" and v is not None}
-        overrides_dict[ov.path.replace("\\", "/")] = d
+        ov_path = ov.path.replace("\\", "/")
+        if os.path.isabs(ov.path):
+            try:
+                ov_path = os.path.relpath(ov.path, input_abs).replace("\\", "/")
+            except ValueError:
+                pass
+        overrides_dict[ov_path] = d
 
     progress_tracker: ProgressTracker | None = None
     skip_paths: set[str] = set()
@@ -444,3 +454,91 @@ def _scan_directory(
 
     entries.sort(key=lambda e: e["name"])
     return entries
+
+
+def check_config(config: BatchConfig | str) -> None:
+    from rich.console import Console
+    from rich.table import Table
+    from rich.panel import Panel
+
+    if isinstance(config, str):
+        config = BatchConfig.from_yaml(config)
+
+    console = Console(highlight=False)
+    reader = LocalStorageReader()
+    scan_result = _scan_directory(config.input, reader, config.recursive)
+
+    input_abs = os.path.abspath(config.input)
+    overrides_dict: dict[str, dict[str, Any]] = {}
+    for ov in config.overrides:
+        d = {k: v for k, v in vars(ov).items() if k != "path" and v is not None}
+        ov_path = ov.path.replace("\\", "/")
+        if os.path.isabs(ov.path):
+            try:
+                ov_path = os.path.relpath(ov.path, input_abs).replace("\\", "/")
+            except ValueError:
+                pass
+        overrides_dict[ov_path] = d
+
+    total = len(scan_result)
+    if total == 0:
+        console.print("[bold yellow]No se encontraron videos[/]")
+        return
+
+    errors = 0
+    for idx, entry in enumerate(scan_result, 1):
+        video_path = entry["path"]
+        rel_path = entry["rel_path"]
+        ov = overrides_dict.get(rel_path.replace("\\", "/"), {})
+
+        final_mask = ov.get("mask") or config.mask or entry.get("mask_path")
+        final_zones = ov.get("zones") or config.zones or entry.get("zones_path")
+        final_model = ov.get("model") or config.model
+        final_backend = ov.get("backend") or config.backend
+
+        source_mask = "override" if "mask" in ov else ("global" if config.mask else "auto")
+        source_zones = "override" if "zones" in ov else ("global" if config.zones else "auto")
+        source_model = "override" if "model" in ov else "global"
+        source_backend = "override" if "backend" in ov else "global"
+
+        table = Table.grid(padding=(0, 2))
+        table.add_column(style="dim", width=10)
+        table.add_column(style="white")
+        table.add_column(style="cyan", width=10)
+
+        table.add_row("video", video_path, "")
+        table.add_row("backend", final_backend, source_backend)
+
+        model_ok = os.path.isfile(final_model) if final_model else False
+        model_flag = "" if model_ok else "  ⚠️"
+        table.add_row("modelo", f"{final_model}{model_flag}", source_model)
+
+        mask_ok = os.path.isfile(final_mask) if final_mask else True
+        mask_flag = "" if mask_ok or not final_mask else "  ⚠️"
+        table.add_row("mascara", f"{final_mask or '—'}{mask_flag}", source_mask if final_mask else "—")
+
+        zones_ok = os.path.isfile(final_zones) if final_zones else True
+        zones_flag = "" if zones_ok or not final_zones else "  ⚠️"
+        table.add_row("zonas", f"{final_zones or '—'}{zones_flag}", source_zones if final_zones else "—")
+
+        issues = []
+        if final_model and not model_ok:
+            issues.append(f"Modelo no encontrado: {final_model}")
+        if final_mask and not mask_ok:
+            issues.append(f"Máscara no encontrada: {final_mask}")
+        if final_zones and not zones_ok:
+            issues.append(f"Zonas no encontradas: {final_zones}")
+
+        title = f"Video {idx}/{total}: {rel_path}"
+        panel = Panel(table, title=title, border_style="blue" if not issues else "yellow")
+        console.print(panel)
+
+        for issue in issues:
+            console.print(f"  [bold yellow]⚠️ {issue}[/]")
+            errors += 1
+
+    console.print()
+    if errors:
+        console.print(f"[bold yellow]⚠ {errors} advertencia(s) — revisá los archivos faltantes[/]")
+    else:
+        console.print("[bold green]✔ Todo en orden[/]")
