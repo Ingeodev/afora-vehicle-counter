@@ -58,10 +58,20 @@ class VehicleClassesResolver:
 
     def resolve_group_include(
         self,
-        include: dict[int, str] | str,
+        include: dict[int, str] | str | list[str],
     ) -> list[str]:
         if isinstance(include, str) and include == "all":
             return list(self._classes.values())
+        if isinstance(include, str):
+            canonical = self._resolve_name(include)
+            return [canonical] if canonical else []
+        if isinstance(include, list):
+            resolved = []
+            for name in include:
+                canonical = self._resolve_name(str(name))
+                if canonical:
+                    resolved.append(canonical)
+            return resolved
         if isinstance(include, dict):
             resolved = []
             for cid, name in include.items():
@@ -74,10 +84,20 @@ class VehicleClassesResolver:
 
     def resolve_group_exclude(
         self,
-        exclude: dict[int, str] | str,
+        exclude: dict[int, str] | str | list[str],
     ) -> set[str]:
         if isinstance(exclude, str) and exclude == "none":
             return set()
+        if isinstance(exclude, str):
+            canonical = self._resolve_name(exclude)
+            return {canonical} if canonical else set()
+        if isinstance(exclude, list):
+            excluded = set()
+            for name in exclude:
+                canonical = self._resolve_name(str(name))
+                if canonical:
+                    excluded.add(canonical)
+            return excluded
         if isinstance(exclude, dict):
             excluded = set()
             for cid, name in exclude.items():
@@ -87,6 +107,13 @@ class VehicleClassesResolver:
                     excluded.add(canonical)
             return excluded
         return set()
+
+    def _resolve_name(self, name: str) -> str | None:
+        name_lower = name.strip().lower()
+        for cls_name in self._classes.values():
+            if cls_name.lower() == name_lower:
+                return cls_name
+        return None
 
     def get_all_types(self) -> list[str]:
         return list(self._classes.values())
