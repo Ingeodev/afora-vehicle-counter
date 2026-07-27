@@ -16,10 +16,11 @@ from .entities import (
 )
 
 # Patron para extraer timestamp del nombre del video:
-#   roosvelt_2026-06-01_15.40.13_detections.csv
+#   roosvelt_2026-06-01_15.40.13_detections.csv  (YYYY-MM-DD)
+#   43hiv00085_10-07-2026_21.31.26_detections.csv  (DD-MM-YYYY)
 #   -> HH=15, MM=40, SS=13
 _VIDEO_TS_PATTERN = re.compile(
-    r".*?_(\d{4}-\d{2}-\d{2})_(\d{2})\.(\d{2})\.(\d{2})_detections\.csv$"
+    r".*?_(\d{4}-\d{2}-\d{2}|\d{2}-\d{2}-\d{4})_(\d{2})\.(\d{2})\.(\d{2})_detections\.csv$"
 )
 
 _DEFAULT_VEHICLE_CLASSES: dict[int, str] = {
