@@ -24,6 +24,7 @@ _VIDEO_TS_PATTERN = re.compile(
 )
 
 _DEFAULT_VEHICLE_CLASSES: dict[int, str] = {
+    0: "person",
     1: "bicycle",
     2: "car",
     3: "motorcycle",
@@ -76,7 +77,7 @@ class VehicleClassesResolver:
             resolved = []
             for cid, name in include.items():
                 cid = int(cid)
-                canonical = self.resolve(cid)
+                canonical = self._resolve_name(str(name)) or self.resolve(cid)
                 if canonical is not None:
                     resolved.append(canonical)
             return resolved
@@ -102,7 +103,7 @@ class VehicleClassesResolver:
             excluded = set()
             for cid, name in exclude.items():
                 cid = int(cid)
-                canonical = self.resolve(cid)
+                canonical = self._resolve_name(str(name)) or self.resolve(cid)
                 if canonical is not None:
                     excluded.add(canonical)
             return excluded

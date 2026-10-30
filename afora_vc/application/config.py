@@ -9,6 +9,7 @@ from ..utils.device import detect_device
 
 
 DEFAULT_VEHICLE_CLASSES = {
+    0: "person",
     1: "bicycle",
     2: "car",
     3: "motorcycle",
@@ -44,9 +45,7 @@ class DetectorConfig:
     confidence_threshold: float = 0.5
     strategy: DetectorStrategy = DetectorStrategy.BOX
     class_thresholds: dict[str, float] | None = None
-    vehicle_classes: dict[int, str] = field(
-        default_factory=lambda: DEFAULT_VEHICLE_CLASSES.copy()
-    )
+    vehicle_classes: dict[int, str] | None = None
     half_precision: bool = True
 
 

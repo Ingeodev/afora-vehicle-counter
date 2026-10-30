@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ...domain.classes import resolve_vehicle_classes
 from ...domain.schemas import RawDetection, BoundingBox
 from ...domain.enums import DeviceType
 from ...domain.exceptions import BackendNotInstalledError
@@ -22,21 +23,16 @@ class YOLODetectorAdapter:
         self._confidence = confidence_threshold
         self._class_thresholds = class_thresholds or {}
 
-        self._classes = vehicle_classes or {
-            1: "bicycle",
-            2: "car",
-            3: "motorcycle",
-            5: "bus",
-            7: "truck",
-        }
-        self._allowed_ids = list(self._classes.keys())
-
         try:
             from ultralytics import YOLO
         except ImportError:
             raise BackendNotInstalledError("yolo", "afora-vehicle-counter[yolo]")
 
         self._model = YOLO(model_path)
+        self._classes = vehicle_classes or resolve_vehicle_classes(
+            getattr(self._model, "names", None)
+        )
+        self._allowed_ids = list(self._classes.keys())
         self._device_str = device.value
         self._half = half_precision and device != DeviceType.CPU
 

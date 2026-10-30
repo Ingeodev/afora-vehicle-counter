@@ -269,4 +269,11 @@ class TestDFineDetectorAdapterInit:
         )
 
         assert adapter._device == DeviceType.CPU
-        assert adapter._classes == {1: "bicycle", 2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
+        assert adapter._classes == {
+            0: "person",
+            1: "bicycle",
+            2: "car",
+            3: "motorcycle",
+            5: "bus",
+            7: "truck",
+        }

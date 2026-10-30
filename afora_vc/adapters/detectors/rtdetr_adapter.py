@@ -1,6 +1,7 @@
 import re
 import numpy as np
 
+from ...domain.classes import resolve_vehicle_classes
 from ...domain.schemas import RawDetection, BoundingBox
 from ...domain.enums import DeviceType
 from ...domain.exceptions import BackendNotInstalledError
@@ -22,21 +23,16 @@ class RTDetrDetectorAdapter:
         self._confidence = confidence_threshold
         self._class_thresholds = class_thresholds or {}
 
-        self._classes = vehicle_classes or {
-            1: "bicycle",
-            2: "car",
-            3: "motorcycle",
-            5: "bus",
-            7: "truck",
-        }
-        self._allowed_ids = list(self._classes.keys())
-
         try:
             from ultralytics import RTDETR
         except ImportError:
             raise BackendNotInstalledError("rtdetr", "afora-vehicle-counter[rtdetr]")
 
         self._model = RTDETR(model_path)
+        self._classes = vehicle_classes or resolve_vehicle_classes(
+            getattr(self._model, "names", None)
+        )
+        self._allowed_ids = list(self._classes.keys())
         self._device_str = device.value
         is_engine = model_path.lower().endswith(".engine")
         if is_engine:

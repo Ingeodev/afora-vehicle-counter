@@ -14,6 +14,7 @@ from ..domain.counting.services import IntervalGrouper, VehicleClassesResolver
 
 # Paleta categorica para tipos de vehiculo
 _VEHICLE_COLORS: dict[str, str] = {
+    "person": "#17becf",
     "car": "#1f77b4",
     "motorcycle": "#ff7f0e",
     "bus": "#2ca02c",

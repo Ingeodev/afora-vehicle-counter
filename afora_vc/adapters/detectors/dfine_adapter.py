@@ -1,5 +1,6 @@
 import numpy as np
 
+from ...domain.classes import resolve_vehicle_classes
 from ...domain.schemas import RawDetection, BoundingBox
 from ...domain.enums import DeviceType
 from ...domain.exceptions import BackendNotInstalledError
@@ -20,15 +21,6 @@ class DFineDetectorAdapter:
         self._class_thresholds = class_thresholds or {}
         self._half_precision = half_precision
 
-        self._classes = vehicle_classes or {
-            1: "bicycle",
-            2: "car",
-            3: "motorcycle",
-            5: "bus",
-            7: "truck",
-        }
-        self._allowed_ids = set(self._classes.keys())
-
         try:
             from transformers import AutoImageProcessor, DFineForObjectDetection
         except ImportError:
@@ -37,6 +29,12 @@ class DFineDetectorAdapter:
         self._processor = AutoImageProcessor.from_pretrained(model_path)
         self._model = DFineForObjectDetection.from_pretrained(model_path)
         self._model.eval()
+
+        model_config = getattr(self._model, "config", None)
+        self._classes = vehicle_classes or resolve_vehicle_classes(
+            getattr(model_config, "id2label", None)
+        )
+        self._allowed_ids = set(self._classes.keys())
 
         device_str = device.value
         if device == DeviceType.CUDA:
