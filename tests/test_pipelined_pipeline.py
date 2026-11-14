@@ -126,7 +126,7 @@ class TestPipelinedPipelineSingleFrame:
         mock_video.frames.return_value = _make_frames(5)
 
         mocker.patch(
-            "afora_vc.application.pipelined_pipeline.VideoSource.from_path",
+            "afora_vc.application.pipelined_pipeline.open_video",
             return_value=mock_video,
         )
 
@@ -158,7 +158,7 @@ class TestPipelinedPipelineSingleFrame:
         mock_video.frames.return_value = _make_frames(3)
 
         mocker.patch(
-            "afora_vc.application.pipelined_pipeline.VideoSource.from_path",
+            "afora_vc.application.pipelined_pipeline.open_video",
             return_value=mock_video,
         )
 
@@ -191,7 +191,7 @@ class TestPipelinedPipelineSingleFrame:
         mock_video.frames.return_value = _make_frames(1)
 
         mocker.patch(
-            "afora_vc.application.pipelined_pipeline.VideoSource.from_path",
+            "afora_vc.application.pipelined_pipeline.open_video",
             return_value=mock_video,
         )
 
@@ -238,7 +238,7 @@ class TestPipelinedPipelineBatchMode:
         mock_video.frames.return_value = _make_frames(8)
 
         mocker.patch(
-            "afora_vc.application.pipelined_pipeline.VideoSource.from_path",
+            "afora_vc.application.pipelined_pipeline.open_video",
             return_value=mock_video,
         )
 
@@ -279,7 +279,7 @@ class TestPipelinedPipelineBatchMode:
         mock_video.frames.return_value = _make_frames(4)
 
         mocker.patch(
-            "afora_vc.application.pipelined_pipeline.VideoSource.from_path",
+            "afora_vc.application.pipelined_pipeline.open_video",
             return_value=mock_video,
         )
 
@@ -322,7 +322,7 @@ class TestPipelinedPipelineCleanup:
         mock_video.frames.return_value = _make_frames(10)
 
         mocker.patch(
-            "afora_vc.application.pipelined_pipeline.VideoSource.from_path",
+            "afora_vc.application.pipelined_pipeline.open_video",
             return_value=mock_video,
         )
 

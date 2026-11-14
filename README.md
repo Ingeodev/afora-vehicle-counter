@@ -97,6 +97,41 @@ afora process video.mp4 \
 | `--profile-path` | Ruta del CSV de profiling | — |
 | `--audit` | Auditar detecciones por etapa | `False` |
 
+### Grabaciones DVR de Dahua (`.dav`)
+
+La librería lee las grabaciones **`.dav` de forma nativa**, sin convertir a MP4.
+No hace falta instalar FFmpeg aparte: `opencv-python-headless` incluye FFmpeg
+con el demuxer `dhav` (FFmpeg >= 4.2), que es lo que permite abrir el formato.
+
+```bash
+# Un archivo .dav suelto
+afora process "grabacion.dav" --zones zonas.json --output ./resultados
+
+# Una carpeta completa con dias de grabacion
+afora scan "/ruta/CAM 2" --output ./resultados --zones zonas.json
+```
+
+Cómo se interpreta la estructura del DVR:
+
+```
+ruta/AAAA-MM-DD/001/dav/HH/HH.MM.SS-HH.MM.SS[...].dav
+```
+
+- La fecha sale de la carpeta `AAAA-MM-DD` y la hora del nombre del archivo.
+- Los segmentos **contiguos de un mismo día se unen en un solo video lógico**:
+  el tracker no se reinicia cada pocos minutos y los vehículos que cruzan el
+  borde entre archivos no se cuentan dos veces.
+- La salida se organiza por fecha:
+  `resultados/AAAA-MM-DD/dav_AAAA-MM-DD_HH.MM.SS_*.csv`. Ese nombre es el que
+  consume el paso de conteo.
+- En `.dav`, `--date` y `--base-time` se ignoran: la fecha y hora reales salen
+  de la ruta.
+- Si hay huecos reales (grabación por movimiento), cada bloque contiguo se
+  procesa como un video independiente.
+
+> Requisito: OpenCV con FFmpeg >= 4.2. Los wheels oficiales lo cumplen.
+> Verificar con `python -c "import cv2; print(cv2.getBuildInformation())"`.
+
 ### Procesar lote por YAML (con reanudacion)
 
 ```bash
@@ -241,13 +276,27 @@ print(f"Tiempo: {result.processing_time_minutes:.1f} min")
 print(f"Zonas: {result.zone_counts}")
 ```
 
+`video` también acepta una grabación DVR de Dahua: una ruta `.dav` o una lista
+de segmentos `.dav` que se procesan como un solo video continuo.
+
+```python
+result = process_video(
+    video=[
+        "CAM 2/2026-11-04/001/dav/10/10.00.00-10.05.00[R][0@0][0][-18000].dav",
+        "CAM 2/2026-11-04/001/dav/10/10.05.00-10.10.00[R][0@0][0][-18000].dav",
+    ],
+    zones="zonas.json",
+    output="./output",
+)
+```
+
 ### Procesar directorio
 
 ```python
 from afora_vc.application.facade import process_directory
 
 results = process_directory(
-    root_path="./videos/",
+    root_path="./videos/",          # tambien acepta arboles de .dav
     output_base="./resultados",
     recursive=True,
     backend="rtdetr",
@@ -306,7 +355,7 @@ afora_vc/
 ├── adapters/             # Implementaciones concretas
 │   ├── detectors/        # YOLO, D-Fine, RT-DETR
 │   ├── trackers/         # BotSORT, ByteTrack
-│   ├── video/            # Lectura/escritura de video
+│   ├── video/            # Lectura/escritura de video (incluye .dav de Dahua)
 │   ├── storage/          # Sistema de archivos
 │   └── preprocessors/    # NoOp, Deblurring, Night Enhance
 ├── output/               # Visualización, exportación CSV, gráficos (Plotly, Chart.js)

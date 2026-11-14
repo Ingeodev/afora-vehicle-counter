@@ -57,7 +57,7 @@ class TestPipelineDetectTrack:
         ]
 
         mocker.patch(
-            "afora_vc.application.pipeline.VideoSource.from_path",
+            "afora_vc.application.pipeline.open_video",
             return_value=mock_video,
         )
 
@@ -95,7 +95,7 @@ class TestPipelineDetectTrack:
         ]
 
         mocker.patch(
-            "afora_vc.application.pipeline.VideoSource.from_path",
+            "afora_vc.application.pipeline.open_video",
             return_value=mock_video,
         )
 
@@ -153,7 +153,7 @@ class TestPipelineDetectTrack:
         ]
 
         mocker.patch(
-            "afora_vc.application.pipeline.VideoSource.from_path",
+            "afora_vc.application.pipeline.open_video",
             return_value=mock_video,
         )
 
@@ -210,7 +210,7 @@ class TestPipelineBatchMode:
         ]
 
         mocker.patch(
-            "afora_vc.application.pipeline.VideoSource.from_path",
+            "afora_vc.application.pipeline.open_video",
             return_value=mock_video,
         )
 
@@ -265,7 +265,7 @@ class TestPipelineBatchMode:
         ]
 
         mocker.patch(
-            "afora_vc.application.pipeline.VideoSource.from_path",
+            "afora_vc.application.pipeline.open_video",
             return_value=mock_video,
         )
 

@@ -23,7 +23,7 @@ def main():
 
     # process
     p = subparsers.add_parser("process", help="Procesar un video")
-    p.add_argument("video", help="Ruta al video de entrada")
+    p.add_argument("video", help="Ruta al video (mp4/avi/mov/mkv o .dav de Dahua)")
     p.add_argument("--zones", "-z", help="Archivo JSON de zonas")
     p.add_argument("--mask", "-m", help="Mascara de region")
     p.add_argument("--output", "-o", default="./output", help="Carpeta de salida")
@@ -78,7 +78,7 @@ def main():
 
     # scan
     s = subparsers.add_parser("scan", help="Procesar directorio de videos")
-    s.add_argument("directory", help="Directorio raiz")
+    s.add_argument("directory", help="Directorio raiz (incluye arboles de .dav de Dahua)")
     s.add_argument("--output", "-o", default="./output", help="Carpeta base de salida")
     s.add_argument("--recursive", "-R", action="store_true")
     s.add_argument("--device", "-d", choices=["cpu", "cuda", "mps"])

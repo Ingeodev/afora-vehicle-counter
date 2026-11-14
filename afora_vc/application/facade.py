@@ -2,7 +2,7 @@ import os
 import threading
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Optional, Literal
+from typing import Any, Optional, Literal, Sequence
 
 import yaml
 
@@ -17,6 +17,7 @@ from ..domain.exceptions import (
 from ..domain.enums import DeviceType, DetectorBackend, TrackerBackend, PreprocessMode, PipelineMode
 from ..domain.counting.services import VehicleClassesResolver
 from ..adapters import DetectorRegistry, TrackerRegistry
+from ..adapters.video.dvr import date_dir_key, group_dvr_paths, is_dvr_path
 from ..adapters.storage.local import LocalStorageReader
 from ..utils.display import DisplayManager
 from ..utils.progress import ProgressTracker
@@ -80,7 +81,7 @@ def _build_pipeline(
 
 
 def process_video(
-    video: str,
+    video: str | Sequence[str],
     zones: Optional[str] = None,
     mask: Optional[str] = None,
     output: str = "./output",
@@ -109,8 +110,12 @@ def process_video(
 ) -> ProcessingResult:
     import os
 
-    if not os.path.exists(video):
-        raise VideoNotFoundError(video)
+    video_inputs = [video] if isinstance(video, (str, os.PathLike)) else list(video)
+    if not video_inputs:
+        raise VideoNotFoundError(str(video))
+    for path in video_inputs:
+        if not os.path.exists(path):
+            raise VideoNotFoundError(path)
 
     if not os.path.exists(output):
         try:
@@ -254,6 +259,8 @@ def process_directory(
         rel_path = entry["rel_path"]
         video_name = entry["name"]
         dir_key = os.path.dirname(rel_path) or "__root__"
+        video_inputs = entry.get("paths") or [video_path]
+        video_input = video_inputs[0] if len(video_inputs) == 1 else video_inputs
         _display.start_video_progress(total=100, description=f"[{i}/{len(pending)}] {video_name}")
 
         # Preserve directory structure in output
@@ -268,11 +275,27 @@ def process_directory(
         if not ov:
             abs_path = os.path.abspath(entry["path"]).replace("\\", "/")
             ov = overrides.get(abs_path, {})
+        if not ov and len(video_inputs) > 1:
+            # Los overrides se declaran por archivo; un grupo DVR abarca varios.
+            for seg_path in video_inputs:
+                seg_rel = os.path.relpath(seg_path, root_path).replace("\\", "/")
+                ov = overrides.get(seg_rel) or overrides.get(
+                    os.path.abspath(seg_path).replace("\\", "/"), {}
+                )
+                if ov:
+                    break
         final_mask = ov.get("mask") or global_mask or entry.get("mask_path")
         final_zones = ov.get("zones") or global_zones or entry.get("zones_path")
 
         # Build per-video kwargs with overrides merged on top
         video_kwargs = dict(kwargs)
+
+        # Metadatos derivados de la grabacion DVR (fecha/hora reales)
+        if entry.get("date"):
+            video_kwargs["date"] = entry["date"]
+        if entry.get("base_time"):
+            video_kwargs["base_time"] = entry["base_time"]
+
         for k in ("reduce", "batch_size", "pipeline_mode", "model", "backend",
                   "tracker_backend", "device", "strategy", "max_minutes",
                   "night_enhance", "deblurring", "no_video", "output_name"):
@@ -281,7 +304,7 @@ def process_directory(
 
         try:
             result = process_video(
-                video=video_path,
+                video=video_input,
                 zones=final_zones,
                 mask=final_mask,
                 output=out_dir,
@@ -416,10 +439,13 @@ def _scan_directory(
     reader: "LocalStorageReader",
     recursive: bool = True,
 ) -> list[dict]:
-    from pathlib import Path
+    entries: list[dict] = []
+    dvr_files: list[str] = []
+    date_assets: dict[str, tuple[str | None, str | None]] = {}
+    root_assets: tuple[str | None, str | None] = (None, None)
 
-    entries = []
     paths_to_scan = [root_path]
+    first_dir = True
 
     while paths_to_scan:
         current = paths_to_scan.pop(0)
@@ -435,22 +461,57 @@ def _scan_directory(
             if ext == ".json":
                 zones_path = fi.path
 
+        if first_dir:
+            root_assets = (mask_path, zones_path)
+            first_dir = False
+
+        # Mascara/zonas a nivel de dia (p.ej. raiz/AAAA-MM-DD/mask.jpg)
+        day_key = date_dir_key(current)
+        if day_key is not None:
+            date_assets[day_key] = (mask_path, zones_path)
+
         for fi in files:
-            if fi.extension.lower() in {".mp4", ".avi", ".mov", ".mkv"}:
+            ext = fi.extension.lower()
+            if ext in {".mp4", ".avi", ".mov", ".mkv"}:
                 rel = os.path.relpath(fi.path, root_path)
                 entries.append({
                     "path": fi.path,
+                    "paths": [fi.path],
                     "rel_path": rel,
                     "name": fi.name,
                     "mask_path": mask_path,
                     "zones_path": zones_path,
                     "output_folder": os.path.join(root_path, "output"),
                 })
+            elif is_dvr_path(fi.path):
+                dvr_files.append(fi.path)
 
         if recursive:
             dir_entries = [e for e in os.scandir(current) if e.is_dir()]
             for d in dir_entries:
                 paths_to_scan.append(d.path)
+
+    # Grabaciones DVR: unir segmentos contiguos por dia en un video logico.
+    # Asi el tracker no se reinicia cada pocos minutos y los tiempos del CSV
+    # siguen siendo absolutos.
+    for recording in group_dvr_paths(dvr_files):
+        start = recording.start
+        day = start.strftime("%Y-%m-%d")
+        name = recording.logical_name
+        mask, zones = date_assets.get(day, (None, None))
+
+        entries.append({
+            "path": recording.segments[0].path,
+            "paths": [seg.path for seg in recording.segments],
+            "rel_path": os.path.join(day, name),
+            "name": name,
+            "mask_path": mask or root_assets[0],
+            "zones_path": zones or root_assets[1],
+            "output_folder": os.path.join(root_path, "output", day),
+            "date": day,
+            "base_time": start.strftime("%H:%M:%S"),
+            "is_dvr": True,
+        })
 
     entries.sort(key=lambda e: e["name"])
     return entries

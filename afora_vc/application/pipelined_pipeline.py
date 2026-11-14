@@ -16,7 +16,7 @@ from ..domain.ports.detector import Detector
 from ..domain.ports.tracker import Tracker
 from ..domain.ports.preprocessor import FramePreprocessor
 from ..domain.ports.storage import StorageReader, StorageWriter
-from ..adapters.video.source import VideoSource
+from ..adapters.video import open_video, video_identity
 from ..adapters.video.writer import AnnotatedVideoWriter, VideoWriterConfig
 from ..adapters.storage.local import LocalStorageReader, LocalStorageWriter
 from ..output.visualizer import Visualizer
@@ -56,7 +56,7 @@ class PipelinedPipeline:
 
     def process_video(
         self,
-        video_path: str,
+        video_path: str | list[str],
         zones_path: str | None = None,
         mask_path: str | None = None,
         output_folder: str | None = None,
@@ -73,8 +73,16 @@ class PipelinedPipeline:
         cfg = self.config
         out_cfg = cfg.output
 
+        identity = video_identity(video_path)
+        video_name = identity.name
+
+        # Una grabacion DVR trae fecha y hora en la ruta: mandan sobre los
+        # valores globales, que no tienen sentido en lotes de varios dias.
+        if identity.is_dvr and identity.start is not None:
+            date = identity.start.strftime("%Y-%m-%d")
+            base_time = identity.start.strftime("%H:%M:%S")
+
         import os as _os
-        video_name = _os.path.basename(video_path)
         _pf = profiler
         _au = auditor
 
@@ -90,8 +98,8 @@ class PipelinedPipeline:
         if mask_path and self.reader.exists(mask_path):
             self.mask_manager.load(self.reader, mask_path)
 
-        video_path_local = self.reader.get_video_path(video_path)
-        video = VideoSource.from_path(video_path_local)
+        local_paths = [self.reader.get_video_path(p) for p in identity.paths]
+        video = open_video(local_paths[0] if len(local_paths) == 1 else local_paths)
 
         self.tracker.reset()
 
@@ -111,13 +119,19 @@ class PipelinedPipeline:
             if cfg.video.max_minutes is not None and cfg.video.max_minutes > 0:
                 max_frames = int(cfg.video.max_minutes * 60 * video.fps)
             else:
-                max_frames = video.total_frames
+                # Leer hasta EOF: en DVR el total es una estimacion y usarlo
+                # como tope podria truncar el ultimo segmento.
+                max_frames = None
+
+            progress_total = (
+                max_frames if max_frames is not None else (video.total_frames or None)
+            )
 
             vehicle_tracker = VehicleTracker()
 
             display.show_start_summary(
                 video_name=video_name,
-                total_frames=max_frames,
+                total_frames=progress_total or 0,
                 fps=video.fps,
                 resolution=(new_width, new_height),
                 backend=cfg.detector.backend.value if hasattr(cfg.detector.backend, 'value') else str(cfg.detector.backend),
@@ -136,9 +150,7 @@ class PipelinedPipeline:
 
             if out_cfg.save_video:
                 if output_name is None:
-                    import os
-                    base_name = os.path.basename(video_path)
-                    output_name = base_name.replace(".mp4", "_processed.mp4")
+                    output_name = f"{_os.path.splitext(video_name)[0]}_processed.mp4"
 
                 output_video_path = f"{output_folder}/{output_name}"
 
@@ -166,7 +178,7 @@ class PipelinedPipeline:
             else:
                 reader_preprocessor = NoOpPreprocessor()
 
-            display.start_progress(total=max_frames, description=f"Procesando {output_name or 'video'}")
+            display.start_progress(total=progress_total or 0, description=f"Procesando {output_name or 'video'}")
 
             if hasattr(self.detector, "warmup"):
                 self.detector.warmup((new_height, new_width, 3))
@@ -375,7 +387,7 @@ class PipelinedPipeline:
             )
 
             return ProcessingResult(
-                video_path=video_path,
+                video_path=identity.primary_path,
                 output_video_path=output_video_path,
                 csv_path=csv_path,
                 total_detections=len(detection_log),
