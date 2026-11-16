@@ -30,14 +30,43 @@ afora --help
 
 ### Manual (alternativa)
 
+#### Desde el repositorio (clon local)
+
 ```bash
-pip install "afora-vehicle-counter[rtdetr,tracking,torch-auto]"
+git clone https://github.com/Ingeodev/afora-vehicle-counter.git
+cd afora-vehicle-counter
+pip install -e ".[rtdetr,tracking]"
 
 # O con CUDA especifico:
-pip install "afora-vehicle-counter[rtdetr,tracking,torch-cu126]"
+pip install -e ".[rtdetr,tracking,torch-cu126]"
 ```
 
-### Extras disponibles
+#### Directo desde GitHub (sin clonar)
+
+```bash
+pip install "git+https://github.com/Ingeodev/afora-vehicle-counter.git#egg=afora-vehicle-counter[rtdetr,tracking]"
+```
+
+> El paquete **no esta publicado en PyPI** aun. `pip install "afora-vehicle-counter"`
+> va a fallar. Usa los comandos de arriba o el instalador de Windows.
+
+#### Google Colab
+
+```python
+!git clone https://github.com/Ingeodev/afora-vehicle-counter.git
+%cd afora-vehicle-counter
+!pip install -q -e ".[rtdetr,tracking]"
+
+# Verificar la version instalada:
+!afora --version
+```
+
+> **Importante:** despues de cada `git pull` o cambio de codigo, reinstalar con
+> `!pip install -e ".[rtdetr,tracking]"` para que el CLI use la version actual.
+> Si ves un banner con `afora 2.0.0a1` seguido de una ruta en `/usr/local/lib/...`
+> que no es tu clon, el CLI esta ejecutando otra copia instalada.
+
+#### Extras disponibles
 
 | Extra | Instala |
 |---|---|
@@ -301,6 +330,8 @@ generar archivos nuevos. Para ignorar `progress.csv` en una corrida puntual:
 ```bash
 afora run config.yaml --no-resume
 ```
+
+**Exit codes:** `0` si todos los videos se procesaron correctamente (o no habia pendientes); `1` si algun video fallo. El mensaje final incluye el recuento: `Completados N videos (X con error), ... detecciones totales`. Los errores se imprimen a **stdout** (no a stderr) en entornos sin TTY como Colab, para que siempre queden visibles.
 
 #### Overrides por video
 
