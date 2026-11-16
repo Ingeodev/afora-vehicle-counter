@@ -43,6 +43,7 @@ def _write_frame(
     zone_manager: ZoneManager,
     visualizer: Visualizer,
     vehicle_tracker: VehicleTracker,
+    output_size: tuple[int, int] | None = None,
 ) -> None:
     frame = fd.frame.copy()
     viz = out_cfg.visualization
@@ -60,6 +61,11 @@ def _write_frame(
         "Tiempo": format_timestamp(fd.timestamp_seconds),
     }
     visualizer.draw_stats(frame, stats)
+
+    # Resize SOLO al escribir el video de salida.
+    if output_size is not None:
+        frame = cv2.resize(frame, output_size, interpolation=cv2.INTER_AREA)
+
     output_queue.put(frame)
 
 
@@ -160,16 +166,9 @@ class Pipeline:
 
         try:
             reduce_factor = cfg.video.reduce_factor
-            new_width = video.width // reduce_factor
-            new_height = video.height // reduce_factor
 
-            if reduce_factor > 1:
-                self.zone_manager.scale_to_resolution(
-                    video.width, video.height, new_width, new_height
-                )
-
-            if self.mask_manager.is_loaded:
-                self.mask_manager.resize_to_frame(new_width, new_height)
+            # Zonas y mascaras trabajan a resolucion original del video.
+            # El resize al video de salida se hace al escribir, no aqui.
 
             if cfg.video.max_minutes is not None and cfg.video.max_minutes > 0:
                 max_frames = int(cfg.video.max_minutes * 60 * video.fps)
@@ -189,7 +188,7 @@ class Pipeline:
                 video_name=video_name,
                 total_frames=progress_total or 0,
                 fps=video.fps,
-                resolution=(new_width, new_height),
+                resolution=(video.width, video.height),
                 backend=cfg.detector.backend.value if hasattr(cfg.detector.backend, 'value') else str(cfg.detector.backend),
                 model=cfg.detector.model_path,
                 device=cfg.detector.device.value if hasattr(cfg.detector.device, 'value') else str(cfg.detector.device),
@@ -211,11 +210,13 @@ class Pipeline:
 
                 output_video_path = f"{output_folder}/{output_name}"
 
+                # Writer usa dimensiones originales del video.
+                # El resize a resolucion de salida se hace en _write_frame.
                 writer_config = VideoWriterConfig(
                     fps=cfg.video.output_fps,
                     codec=cfg.video.codec,
-                    width=new_width,
-                    height=new_height,
+                    width=video.width,
+                    height=video.height,
                     crf=cfg.video.crf,
                     preset=cfg.video.preset,
                 )
@@ -225,7 +226,11 @@ class Pipeline:
 
             frames_processed = 0
             start_time = time.time()
-            resize = (new_width, new_height) if reduce_factor > 1 else None
+
+            # Tamano de salida para el resize en _write_frame.
+            out_size: tuple[int, int] | None = None
+            if reduce_factor > 1:
+                out_size = (video.width // reduce_factor, video.height // reduce_factor)
 
             # Preprocessors
             from ..adapters.preprocessors.noop import NoOpPreprocessor
@@ -242,7 +247,7 @@ class Pipeline:
 
             # Warmup: run a dummy inference to load CUDA kernels, ONNX runtime, etc.
             if hasattr(self.detector, "warmup"):
-                self.detector.warmup((new_height, new_width, 3))
+                self.detector.warmup((video.height, video.width, 3))
 
             # Threaded reader
             qsize = cfg.batch.queue_maxsize
@@ -250,7 +255,7 @@ class Pipeline:
 
             def _reader_worker():
                 try:
-                    for fd in video.frames(max_frames=max_frames, resize=resize, skip_rate=cfg.video.skip_rate):
+                    for fd in video.frames(max_frames=max_frames, skip_rate=cfg.video.skip_rate):
                         input_queue.put(fd)
                 finally:
                     input_queue.put(None)
@@ -363,6 +368,7 @@ class Pipeline:
                                 fd_orig, detections, output_queue,
                                 video_writer, out_cfg, self.zone_manager,
                                 self.visualizer, vehicle_tracker,
+                                output_size=out_size,
                             )
                             if _pf: _pf.record(video_name, fd_orig.index, "visualize", (time.perf_counter() - t) * 1000)
 
@@ -433,6 +439,7 @@ class Pipeline:
                         fd, detections, output_queue,
                         video_writer, out_cfg, self.zone_manager,
                         self.visualizer, vehicle_tracker,
+                        output_size=out_size,
                     )
                     if _pf: _pf.record(video_name, fi, "visualize", (time.perf_counter() - t) * 1000)
 
@@ -505,6 +512,7 @@ class Pipeline:
                             fd_orig, detections, output_queue,
                             video_writer, out_cfg, self.zone_manager,
                             self.visualizer, vehicle_tracker,
+                            output_size=out_size,
                         )
                         if _pf: _pf.record(video_name, fd_orig.index, "visualize", (time.perf_counter() - t) * 1000)
                 batch_buffer.clear()

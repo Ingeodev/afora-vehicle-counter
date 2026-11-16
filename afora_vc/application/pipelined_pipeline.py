@@ -105,16 +105,9 @@ class PipelinedPipeline:
 
         try:
             reduce_factor = cfg.video.reduce_factor
-            new_width = video.width // reduce_factor
-            new_height = video.height // reduce_factor
 
-            if reduce_factor > 1:
-                self.zone_manager.scale_to_resolution(
-                    video.width, video.height, new_width, new_height
-                )
-
-            if self.mask_manager.is_loaded:
-                self.mask_manager.resize_to_frame(new_width, new_height)
+            # Zonas y mascaras trabajan a resolucion original del video.
+            # El resize al video de salida se hace al escribir, no aqui.
 
             if cfg.video.max_minutes is not None and cfg.video.max_minutes > 0:
                 max_frames = int(cfg.video.max_minutes * 60 * video.fps)
@@ -133,7 +126,7 @@ class PipelinedPipeline:
                 video_name=video_name,
                 total_frames=progress_total or 0,
                 fps=video.fps,
-                resolution=(new_width, new_height),
+                resolution=(video.width, video.height),
                 backend=cfg.detector.backend.value if hasattr(cfg.detector.backend, 'value') else str(cfg.detector.backend),
                 model=cfg.detector.model_path,
                 device=cfg.detector.device.value if hasattr(cfg.detector.device, 'value') else str(cfg.detector.device),
@@ -154,11 +147,12 @@ class PipelinedPipeline:
 
                 output_video_path = f"{output_folder}/{output_name}"
 
+                # Writer usa dimensiones originales del video.
                 writer_config = VideoWriterConfig(
                     fps=cfg.video.output_fps,
                     codec=cfg.video.codec,
-                    width=new_width,
-                    height=new_height,
+                    width=video.width,
+                    height=video.height,
                     crf=cfg.video.crf,
                     preset=cfg.video.preset,
                 )
@@ -168,7 +162,11 @@ class PipelinedPipeline:
 
             frames_processed = 0
             start_time = time.time()
-            resize = (new_width, new_height) if reduce_factor > 1 else None
+
+            # Tamano de salida para el resize en _write_frame.
+            out_size: tuple[int, int] | None = None
+            if reduce_factor > 1:
+                out_size = (video.width // reduce_factor, video.height // reduce_factor)
 
             from ..adapters.preprocessors.noop import NoOpPreprocessor
             from ..adapters.preprocessors.deblurring import DeblurringPreprocessor
@@ -183,7 +181,7 @@ class PipelinedPipeline:
             display.start_progress(total=progress_total or 0, description=f"Procesando {output_name or 'video'}")
 
             if hasattr(self.detector, "warmup"):
-                self.detector.warmup((new_height, new_width, 3))
+                self.detector.warmup((video.height, video.width, 3))
 
             qsize = cfg.batch.queue_maxsize
             batch_enabled = cfg.batch.enabled
@@ -205,7 +203,7 @@ class PipelinedPipeline:
             # ─── Thread 1: Reader + Preprocessor ─────────────────────────
             def _reader_worker():
                 try:
-                    for fd in video.frames(max_frames=max_frames, resize=resize, skip_rate=cfg.video.skip_rate):
+                    for fd in video.frames(max_frames=max_frames, skip_rate=cfg.video.skip_rate):
                         t = time.perf_counter()
                         processed = reader_preprocessor.process(fd.frame)
                         if _pf: _pf.record(video_name, fd.index, "preprocess", (time.perf_counter() - t) * 1000)
@@ -322,6 +320,7 @@ class PipelinedPipeline:
                                 fd, detections, output_queue,
                                 video_writer, out_cfg, self.zone_manager,
                                 self.visualizer, vehicle_tracker,
+                                output_size=out_size,
                             )
                             if _pf: _pf.record(video_name, fd.index, "visualize", (time.perf_counter() - t) * 1000)
 

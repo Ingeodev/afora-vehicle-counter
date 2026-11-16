@@ -42,12 +42,12 @@ ZONE_COLORS = [
 
 # Colores por defecto por clase si no se configuran en el YAML.
 DEFAULT_CLASS_COLORS: dict[str, tuple[int, int, int]] = {
-    "car": (0, 165, 255),       # Naranja
-    "truck": (0, 100, 255),     # Naranja oscuro
-    "bus": (0, 255, 255),       # Amarillo
-    "motorcycle": (255, 0, 0),  # Azul
-    "bicycle": (0, 255, 0),     # Verde
-    "person": (255, 255, 255),  # Blanco
+    "car": _hex_to_bgr("#FFFF00"),         # Amarillo
+    "truck": _hex_to_bgr("#FF0000"),       # Rojo puro
+    "bus": _hex_to_bgr("#FFFFFF"),         # Blanco
+    "motorcycle": _hex_to_bgr("#FF00FF"),  # Magenta
+    "bicycle": _hex_to_bgr("#00FF00"),     # Verde lima
+    "person": _hex_to_bgr("#00FFFF"),      # Cian
 }
 
 
