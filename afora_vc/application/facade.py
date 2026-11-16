@@ -1,4 +1,5 @@
 import os
+import logging
 import threading
 from collections import defaultdict
 from pathlib import Path
@@ -25,6 +26,9 @@ from .config import PipelineConfig
 from .pipeline import Pipeline
 from .pipelined_pipeline import PipelinedPipeline
 from .batch_config import BatchConfig, VideoOverride
+
+
+logger = logging.getLogger(__name__)
 
 
 def _build_pipeline(
@@ -192,6 +196,11 @@ def process_video(
 
     _display = DisplayManager(verbose=not quiet, quiet=quiet)
 
+    logger.info(
+        "Procesando %s (backend=%s, device=%s, video_out=%s)",
+        video, backend, device, "no" if no_video else "si",
+    )
+
     pipeline = _build_pipeline(config, model, strategy)
 
     result = pipeline.process_video(
@@ -211,6 +220,14 @@ def process_video(
 
     if _auditor:
         _display.show_audit_report(_auditor.report())
+
+    logger.info(
+        "Listo %s: %d frames, %d detecciones, %.1fs",
+        video,
+        result.frames_processed,
+        result.total_detections,
+        result.processing_time_seconds,
+    )
 
     return result
 
@@ -242,11 +259,18 @@ def process_directory(
     skipped_count = total_videos - len(pending)
 
     if skipped_count:
-        _display.show_info(f"Procesados previamente: {skipped_count} videos (saltados)")
+        _display.show_info(
+            f"Procesados previamente: {skipped_count} videos (saltados). "
+            "Borra progress.csv para reprocesar."
+        )
     _display.show_info(f"Escaneando: {root_path} -- {len(pending)} pendientes de {total_videos}")
 
     if not pending:
         _display.show_success("Todos los videos ya fueron procesados")
+        _display.show_info(
+            "Nada para hacer. Borra progress.csv (junto al YAML) "
+            "o usa 'afora run --no-resume' para reprocesar."
+        )
         return results
 
     # Agrupar pendientes por subdirectorio
@@ -326,6 +350,12 @@ def process_directory(
                 ]},
             )
             results.append(result)
+            _display.video_finished(
+                i, len(pending), video_name,
+                frames=result.frames_processed,
+                seconds=result.processing_time_seconds,
+                ok=True,
+            )
             if progress_tracker is not None:
                 progress_tracker.mark_completed(
                     video_path=video_path,
@@ -335,6 +365,9 @@ def process_directory(
                 )
         except Exception as e:
             _display.show_error(str(e), context=video_name)
+            _display.video_finished(
+                i, len(pending), video_name, ok=False
+            )
         finally:
             _display.stop_video_progress()
             _display.update_scan(advance=1)
@@ -376,7 +409,9 @@ def _run_count_pipeline(count_config, out_dir, dir_key, resolver):
         export_chart(data, count_config, resolver or VehicleClassesResolver(), out_dir, date=dir_key)
 
 
-def process_from_config(config: BatchConfig | str) -> list[ProcessingResult]:
+def process_from_config(
+    config: BatchConfig | str, resume: bool = True
+) -> list[ProcessingResult]:
     config_path: str | None = None
     if isinstance(config, str):
         config_path = config
@@ -398,7 +433,7 @@ def process_from_config(config: BatchConfig | str) -> list[ProcessingResult]:
 
     progress_tracker: ProgressTracker | None = None
     skip_paths: set[str] = set()
-    if config_path:
+    if resume and config_path:
         config_dir = os.path.dirname(os.path.abspath(config_path))
         progress_path = os.path.join(config_dir, "progress.csv")
         progress_tracker = ProgressTracker(progress_path)

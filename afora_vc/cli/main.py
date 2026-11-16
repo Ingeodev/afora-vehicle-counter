@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 
@@ -11,18 +12,53 @@ from ..utilities.video_sorter import sort_videos_by_date, rollback_sort
 from ..utils.display import DisplayManager
 
 
+_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+_LOG_DATE_FORMAT = "%H:%M:%S"
+
+
+def _configure_logging(level: str = "WARNING", verbose: bool = False) -> None:
+    """Configura logging hacia stdout.
+
+    Por defecto el paquete no configura nada: los INFO se pierden y los
+    WARNING van a stderr por el handler de emergencia, que Colab no siempre
+    muestra. Escribiendo a stdout, cualquier notebook/runner los ve.
+    """
+    if verbose and level.upper() == "WARNING":
+        level = "INFO"
+    logging.basicConfig(
+        level=getattr(logging, level.upper(), logging.WARNING),
+        stream=sys.stdout,
+        force=True,
+        format=_LOG_FORMAT,
+        datefmt=_LOG_DATE_FORMAT,
+    )
+
+
 def main():
     import argparse
+
+    # Opciones de logging compartidas: se aceptan antes o despues del subcomando.
+    log_parent = argparse.ArgumentParser(add_help=False)
+    log_parent.add_argument(
+        "-v", "--verbose", action="store_true", default=argparse.SUPPRESS,
+        help="Logs INFO a stdout",
+    )
+    log_parent.add_argument(
+        "--log-level", default=argparse.SUPPRESS,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Nivel de logging (default WARNING)",
+    )
 
     parser = argparse.ArgumentParser(
         description="Contador de vehiculos multi-backend",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        parents=[log_parent],
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Comandos disponibles")
 
     # process
-    p = subparsers.add_parser("process", help="Procesar un video")
+    p = subparsers.add_parser("process", help="Procesar un video", parents=[log_parent])
     p.add_argument("video", help="Ruta al video (mp4/avi/mov/mkv o .dav de Dahua)")
     p.add_argument("--zones", "-z", help="Archivo JSON de zonas")
     p.add_argument("--mask", "-m", help="Mascara de region")
@@ -54,24 +90,33 @@ def main():
     p.add_argument("--audit", action="store_true", help="Auditar detecciones por etapa del pipeline")
 
     # run (batch config)
-    r = subparsers.add_parser("run", help="Procesar desde archivo de configuracion YAML")
+    r = subparsers.add_parser(
+        "run", help="Procesar desde archivo de configuracion YAML", parents=[log_parent]
+    )
     r.add_argument("config", help="Ruta al archivo .yaml de configuracion")
     r.add_argument("--quiet", "-q", action="store_true", help="Modo silencioso")
     r.add_argument("--graph", choices=["none", "image", "web"], help="Tipo de grafico (sorescribe el YAML)")
     r.add_argument("--codec", choices=["avc1", "h264", "hevc", "h265", "mp4v"], help="Codec del video (sobreescribe el YAML)")
     r.add_argument("--crf", type=int, help="Calidad 0-51 (sobreescribe el YAML)")
     r.add_argument("--preset", help="Preset x264 (sobreescribe el YAML)")
+    r.add_argument("--no-resume", action="store_true", help="Ignorar progress.csv y reprocesar todo")
 
     # utils
-    utils_parser = subparsers.add_parser("utils", help="Utility tools")
+    utils_parser = subparsers.add_parser("utils", help="Utility tools", parents=[log_parent])
     utils_sub = utils_parser.add_subparsers(dest="util_cmd", help="Utility command")
 
-    gbd = utils_sub.add_parser("group-by-date", help="Group video files into date-based subdirectories")
+    gbd = utils_sub.add_parser(
+        "group-by-date",
+        help="Group video files into date-based subdirectories",
+        parents=[log_parent],
+    )
     gbd.add_argument("path", help="Folder containing video files")
     gbd.add_argument("--rollback", "-r", action="store_true", help="Undo a previous group-by-date operation")
 
     # group
-    g = subparsers.add_parser("group", help="Agrupar detecciones de una carpeta procesada")
+    g = subparsers.add_parser(
+        "group", help="Agrupar detecciones de una carpeta procesada", parents=[log_parent]
+    )
     g.add_argument("--folder", "-f", help="Carpeta con detections.csv")
     g.add_argument("--config", "-c", required=True, help="YAML con configuracion (usa seccion count:)")
     g.add_argument("--model-config", help="YAML con config del modelo (vehicle_classes)")
@@ -79,11 +124,17 @@ def main():
     g.add_argument("--graph", choices=["none", "image", "web"], help="Tipo de grafico (sorescribe el YAML)")
 
     # check
-    ck = subparsers.add_parser("check", help="Previsualizar configuracion por video sin procesar")
+    ck = subparsers.add_parser(
+        "check",
+        help="Previsualizar configuracion por video sin procesar",
+        parents=[log_parent],
+    )
     ck.add_argument("config", help="Ruta al archivo .yaml de configuracion")
 
     # scan
-    s = subparsers.add_parser("scan", help="Procesar directorio de videos")
+    s = subparsers.add_parser(
+        "scan", help="Procesar directorio de videos", parents=[log_parent]
+    )
     s.add_argument("directory", help="Directorio raiz (incluye arboles de .dav de Dahua)")
     s.add_argument("--output", "-o", default="./output", help="Carpeta base de salida")
     s.add_argument("--recursive", "-R", action="store_true")
@@ -115,6 +166,11 @@ def main():
     s.add_argument("--audit", action="store_true", help="Auditar detecciones por etapa del pipeline")
 
     args = parser.parse_args()
+
+    _configure_logging(
+        getattr(args, "log_level", "WARNING"),
+        getattr(args, "verbose", False),
+    )
 
     if args.command is None:
         parser.print_help()
@@ -243,7 +299,7 @@ def _cmd_run(args):
         config_obj.crf = args.crf
     if args.preset is not None:
         config_obj.preset = args.preset
-    results = process_from_config(config_obj)
+    results = process_from_config(config_obj, resume=not args.no_resume)
     if not args.quiet:
         total = sum(r.total_detections for r in results)
         print(f"Completados {len(results)} videos, {total} detecciones totales")

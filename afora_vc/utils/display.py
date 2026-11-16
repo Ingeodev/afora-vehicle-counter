@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import time
 from collections import Counter
@@ -25,14 +26,40 @@ _STYLE_DIM = "dim white"
 
 
 class DisplayManager:
-    def __init__(self, verbose: bool = True, quiet: bool = False):
+    def __init__(
+        self,
+        verbose: bool = True,
+        quiet: bool = False,
+        interactive: bool | None = None,
+    ):
         self.verbose = verbose
         self.quiet = quiet
         self.console = Console(highlight=False)
         self._err_console = Console(highlight=False, stderr=True)
+        # En Colab/CI stderr no es TTY: tqdm con "\r" se ve mal o no se ve.
+        self.interactive = (
+            self._detect_interactive() if interactive is None else interactive
+        )
+        # Segundos minimos entre lineas de progreso en modo no interactivo.
+        self.progress_log_interval = 30.0
         self._tqdm_bar: tqdm | None = None
         self._scan_tqdm: tqdm | None = None
         self._video_tqdm: tqdm | None = None
+        self._plain_active = False
+        self._plain_desc = ""
+        self._plain_total = 0
+        self._plain_count = 0
+        self._plain_last_emit = 0.0
+
+    @staticmethod
+    def _detect_interactive() -> bool:
+        env = os.environ.get("AFORA_PROGRESS")
+        if env is not None:
+            return env.strip().lower() not in ("0", "false", "no", "off")
+        try:
+            return bool(sys.stderr.isatty())
+        except (AttributeError, ValueError):
+            return False
 
     def print(self, *args: Any, **kwargs: Any) -> None:
         if not self.quiet:
@@ -88,6 +115,15 @@ class DisplayManager:
     def start_progress(self, total: int, description: str = "Procesando") -> None:
         if self.quiet:
             return
+        self._plain_desc = description
+        self._plain_total = int(total or 0)
+        self._plain_count = 0
+        # Primera linea de progreso recien pasado el intervalo: el panel de
+        # inicio ya avisa que el video arranco.
+        self._plain_last_emit = time.monotonic()
+        self._plain_active = True
+        if not self.interactive:
+            return
         self._tqdm_bar = tqdm(
             total=total,
             desc=description,
@@ -101,16 +137,52 @@ class DisplayManager:
         total: int | None = None,
         extra: str = "",
     ) -> None:
+        if total is not None:
+            self._plain_total = int(total)
+            if self._tqdm_bar is not None:
+                self._tqdm_bar.total = total
+                self._tqdm_bar.refresh()
+        if not self.interactive:
+            if not self._plain_active:
+                return
+            self._plain_count += advance
+            now = time.monotonic()
+            if (
+                self._plain_last_emit
+                and now - self._plain_last_emit < self.progress_log_interval
+            ):
+                return
+            self._plain_last_emit = now
+            self._print_plain_progress(extra)
+            return
         if self._tqdm_bar is None:
             return
-        if total is not None:
-            self._tqdm_bar.total = total
-            self._tqdm_bar.refresh()
         if extra:
             self._tqdm_bar.set_postfix_str(extra)
         self._tqdm_bar.update(advance)
 
+    def _plain_status(self) -> str:
+        total = self._plain_total
+        if total > 0:
+            # El total puede quedar corto (max_minutes, frames finales del
+            # contenedor): se recorta para no mostrar 107%.
+            count = min(self._plain_count, total)
+            pct = min(100, count * 100 // total)
+            return f"{self._plain_desc}: {pct}% ({count}/{total})"
+        return f"{self._plain_desc}: {self._plain_count} frames"
+
+    def _print_plain_progress(self, extra: str = "") -> None:
+        line = self._plain_status()
+        if extra:
+            line = f"{line} {extra}"
+        self.console.print(line)
+
     def stop_progress(self) -> None:
+        if not self.interactive:
+            if self._plain_active and not self.quiet:
+                self.console.print(self._plain_status())
+            self._plain_active = False
+            return
         if self._tqdm_bar is not None:
             self._tqdm_bar.close()
             self._tqdm_bar = None
@@ -187,7 +259,7 @@ class DisplayManager:
         total_videos: int,
         description: str = "Procesando videos",
     ) -> None:
-        if self.quiet:
+        if self.quiet or not self.interactive:
             return
         self._scan_tqdm = tqdm(
             total=total_videos,
@@ -198,7 +270,7 @@ class DisplayManager:
         )
 
     def update_scan(self, advance: int = 1, extra: str = "") -> None:
-        if self._scan_tqdm is None:
+        if not self.interactive or self._scan_tqdm is None:
             return
         if extra:
             self._scan_tqdm.set_postfix_str(extra)
@@ -209,7 +281,7 @@ class DisplayManager:
         total: int,
         description: str = "Video actual",
     ) -> None:
-        if self._scan_tqdm is None:
+        if not self.interactive or self._scan_tqdm is None:
             return
         if self._video_tqdm is not None:
             self._video_tqdm.close()
@@ -222,7 +294,7 @@ class DisplayManager:
         )
 
     def update_video_progress(self, advance: int = 1, extra: str = "") -> None:
-        if self._video_tqdm is None:
+        if not self.interactive or self._video_tqdm is None:
             return
         if extra:
             self._video_tqdm.set_postfix_str(extra)
@@ -240,6 +312,27 @@ class DisplayManager:
         if self._scan_tqdm is not None:
             self._scan_tqdm.close()
             self._scan_tqdm = None
+
+    def video_finished(
+        self,
+        index: int,
+        total: int,
+        name: str,
+        frames: int = 0,
+        seconds: float = 0.0,
+        ok: bool = True,
+    ) -> None:
+        """Linea compacta por video, solo en entornos no interactivos.
+
+        En una terminal real el progreso ya lo muestran las barras; en Colab o
+        CI (sin TTY) esto deja un rastro legible sin caracteres de control.
+        """
+        if self.quiet or self.interactive:
+            return
+        status = "OK" if ok else "ERROR"
+        self.console.print(
+            f"[{index}/{total}] {name} -> {status} ({frames} frames, {seconds:.1f}s)"
+        )
 
     # ── Error display ──────────────────────────────────────
 

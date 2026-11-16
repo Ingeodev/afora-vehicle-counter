@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -201,7 +202,7 @@ def _create_writer(path: str, config: VideoWriterConfig) -> _PyAvBackend | _Open
         )
 
     try:
-        return _PyAvBackend(path, config, encoder)
+        backend = _PyAvBackend(path, config, encoder)
     except ImportError:
         logger.warning(
             "PyAV no esta instalado: se usa '%s' de OpenCV (archivos mas pesados).",
@@ -212,6 +213,13 @@ def _create_writer(path: str, config: VideoWriterConfig) -> _PyAvBackend | _Open
             "No se pudo inicializar '%s' via PyAV (%s). Usando fallback '%s'.",
             encoder, exc, _FALLBACK_CODEC,
         )
+    else:
+        logger.info(
+            "Video de salida %s: %s via PyAV (crf=%d, preset=%s, %dx%d @ %.2f fps)",
+            os.path.basename(path), encoder, config.crf, config.preset,
+            config.width, config.height, config.fps,
+        )
+        return backend
     return _OpenCvBackend(path, replace(config, codec=_FALLBACK_CODEC))
 
 
@@ -260,6 +268,19 @@ class AnnotatedVideoWriter:
             self._backend.release()
         if self._storage and self._temp_path and self._temp_path != self._output_path:
             self._storage.finalize_video(self._temp_path, self._output_path)
+        self._log_result()
+
+    def _log_result(self) -> None:
+        if not logger.isEnabledFor(logging.INFO):
+            return
+        try:
+            size_mb = os.path.getsize(self._output_path) / (1024 * 1024)
+        except OSError:
+            return
+        logger.info(
+            "Video escrito %s: %d frames, %.2f MB",
+            os.path.basename(self._output_path), self.frame_count, size_mb,
+        )
 
     @property
     def frame_count(self) -> int:

@@ -99,6 +99,11 @@ afora process video.mp4 \
 | `--profile` | Habilitar profiling por paso | `False` |
 | `--profile-path` | Ruta del CSV de profiling | — |
 | `--audit` | Auditar detecciones por etapa | `False` |
+| `-v, --verbose` | Logs `INFO` a stdout | `False` |
+| `--log-level` | Nivel de logging (`DEBUG`, `INFO`, `WARNING`, ...) | `WARNING` |
+
+Ver [Logging y progreso](#logging-y-progreso-tty-colab-ci) para el detalle de
+cómo se comporta en Colab o CI.
 
 ### Grabaciones DVR de Dahua (`.dav`)
 
@@ -290,6 +295,13 @@ input_path,output_path,processing_time_minutes,total_detections
 C:\Videos\roosvelt\video1.mp4,C:\output\roosvelt,26.59,8269
 ```
 
+Si todos los videos ya estaban procesados, `run` termina con exit code `0` sin
+generar archivos nuevos. Para ignorar `progress.csv` en una corrida puntual:
+
+```bash
+afora run config.yaml --no-resume
+```
+
 #### Overrides por video
 
 Se pueden sobreescribir parámetros para videos específicos:
@@ -311,6 +323,46 @@ Los overrides aceptan los mismos campos de video que el YAML global:
 `model_config`, `tracker_config`, `base_time`, `date`, `queue_maxsize`,
 `profile`, `profile_path` y `audit`. Los valores del override pisan al global
 solo para ese video.
+
+### Logging y progreso (TTY, Colab, CI)
+
+Por defecto el CLI no imprime logs: solo los paneles de resumen y el progreso.
+Para ver los logs del paquete (backend elegido, encoder del video, peso final,
+errores) usá:
+
+```bash
+afora run config.yaml -v            # INFO a stdout
+afora run config.yaml --log-level DEBUG
+```
+
+| Flag | Descripción | Default |
+|---|---|---|
+| `-v, --verbose` | Logs a nivel `INFO` | desactivado |
+| `--log-level` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` | `WARNING` |
+
+Los logs se escriben a **stdout** (no a stderr) con `force=True`, así se ven en
+Jupyter/Colab, en CI y en cualquier runner que capture stdout. Se pueden pasar
+antes o después del subcomando (`afora -v run ...` o `afora run ... -v`).
+
+El progreso se adapta al entorno:
+
+- **Terminal real (TTY)**: barras de `tqdm` con refresco en vivo.
+- **Sin TTY (Colab, notebooks, CI, salida redirigida)**: sin barras ni `\r`; se
+  emite una línea cada 30 s con el porcentaje y una línea compacta por video:
+
+  ```
+  Procesando video_processed.mp4: 45% (5000/11000)
+  [1/4] video1.mp4 -> OK (11000 frames, 320.4s)
+  ```
+
+Si redirigís la salida a un archivo y querés las barras igual, forzalas con:
+
+```bash
+AFORA_PROGRESS=1 afora run config.yaml
+```
+
+`quiet: true` en el YAML (o `--quiet`) sigue silenciando ambos formatos.
+
 
 ### Agrupar detecciones (post-procesamiento)
 
