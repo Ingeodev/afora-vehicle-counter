@@ -213,7 +213,7 @@ class TestRTDetrDetectorAdapterInit:
         adapter._class_thresholds = {}
 
         adapter.warmup((640, 480, 3))
-        mock_model.assert_called_once()
+        assert mock_model.call_count == 30
 
     def test_supports_batch_is_true(self):
         from afora_vc.adapters.detectors.rtdetr_adapter import RTDetrDetectorAdapter

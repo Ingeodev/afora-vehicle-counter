@@ -98,7 +98,9 @@ class DFineDetectorAdapter:
 
     def warmup(self, input_shape: tuple[int, int, int]) -> None:
         dummy = np.zeros(input_shape, dtype=np.uint8)
-        self.detect(dummy)
+        # Warmup multiple (30) para que CUDA compile kernels y cuDNN auto-tune.
+        for _ in range(30):
+            self.detect(dummy)
 
     def _parse_results(self, result: dict) -> list[RawDetection]:
         scores = result.get("scores")

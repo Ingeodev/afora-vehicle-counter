@@ -90,10 +90,12 @@ class RTDetrDetectorAdapter:
 
     def warmup(self, input_shape: tuple[int, int, int]) -> None:
         dummy = np.zeros(input_shape, dtype=np.uint8)
-        if self._engine_batch > 1:
-            self.detect_batch([dummy] * self._engine_batch)
-        else:
-            self._model(dummy, verbose=False)
+        # Warmup multiple (30) para que CUDA compile kernels y cuDNN auto-tune.
+        for _ in range(30):
+            if self._engine_batch > 1:
+                self.detect_batch([dummy] * self._engine_batch)
+            else:
+                self._model(dummy, verbose=False)
 
     def _parse_results(self, results) -> list[RawDetection]:
         if not results or len(results) == 0:

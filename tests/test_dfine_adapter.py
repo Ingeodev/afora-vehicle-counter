@@ -202,7 +202,7 @@ class TestDFineDetectorAdapterInit:
         adapter._processor.post_process_object_detection.return_value = [mock_result]
 
         adapter.warmup((640, 480, 3))
-        adapter._model.assert_called_once()
+        assert adapter._model.call_count == 30
 
     def test_supports_batch_is_true(self):
         from afora_vc.adapters.detectors.dfine_adapter import DFineDetectorAdapter

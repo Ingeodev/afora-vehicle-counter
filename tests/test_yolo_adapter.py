@@ -210,7 +210,7 @@ class TestYOLODetectorAdapterInit:
         adapter._class_thresholds = {}
 
         adapter.warmup((640, 480, 3))
-        mock_model.assert_called_once()
+        assert mock_model.call_count == 20
 
     def test_supports_batch_is_true(self):
         from afora_vc.adapters.detectors.yolo_adapter import YOLODetectorAdapter

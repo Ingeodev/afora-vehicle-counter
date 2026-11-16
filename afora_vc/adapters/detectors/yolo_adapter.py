@@ -58,7 +58,9 @@ class YOLODetectorAdapter:
 
     def warmup(self, input_shape: tuple[int, int, int]) -> None:
         dummy = np.zeros(input_shape, dtype=np.uint8)
-        self._model(dummy, verbose=False)
+        # Múltiples iteraciones para compilar kernels CUDA y auto-tuning de cuDNN.
+        for _ in range(20):
+            self._model(dummy, verbose=False)
 
     def _parse_results(self, results) -> list[RawDetection]:
         if not results or len(results) == 0:
