@@ -87,14 +87,8 @@ class VisualizationConfig:
     trajectory_class_colors: bool = True  # Usar color por clase de vehiculo.
 
     # Colores por clase (BGR). Se usa si trajectory_class_colors = True.
-    class_colors: dict[str, tuple[int, int, int]] = field(default_factory=lambda: {
-        "car": (0, 165, 255),       # Naranja
-        "truck": (0, 100, 255),     # Naranja oscuro
-        "bus": (0, 255, 255),       # Amarillo
-        "motorcycle": (255, 0, 0),  # Azul
-        "bicycle": (0, 255, 0),     # Verde
-        "person": (255, 255, 255),  # Blanco
-    })
+    # None = usa DEFAULT_CLASS_COLORS del visualizer.
+    class_colors: dict[str, tuple[int, int, int]] | None = None
 
     # Label: template con variables $id, $class, $zones.
     # Ejemplo: "$id-$zones\n$class" → "42-ZA,ZB\ncar"
