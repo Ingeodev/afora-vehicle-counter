@@ -26,6 +26,9 @@ class VideoOverride:
     night_enhance: bool | None = None
     deblurring: bool | None = None
     no_video: bool | None = None
+    codec: str | None = None
+    crf: int | None = None
+    preset: str | None = None
     output_name: str | None = None
     model_config: str | None = None
     tracker_config: str | None = None
@@ -59,6 +62,12 @@ class BatchConfig:
     no_video: bool = False
     output_name: str | None = None
     quiet: bool = False
+
+    # Video de salida (solo verificacion): avc1/h264, hevc/h265 o mp4v.
+    # crf mas alto = archivo mas chico; preset mas rapido = menos CPU.
+    codec: str = "avc1"
+    crf: int = 30
+    preset: str = "veryfast"
 
     model_config: str | None = None
     tracker_config: str | None = None

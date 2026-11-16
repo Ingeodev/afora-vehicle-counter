@@ -26,6 +26,10 @@ dependencies = [
     # opencv-python-headless incluye FFmpeg con el demuxer 'dhav' (DVR Dahua),
     # por lo que los .dav se leen directo sin instalar ffmpeg en el sistema.
     "opencv-python-headless>=4.8.0",
+    # PyAV trae FFmpeg con libx264/libx265 en sus wheels. OpenCV no incluye
+    # libx264 (GPL), por eso el codec 'avc1' caia a 'mp4v' y generaba videos
+    # enormes. Se usa solo para escribir el video anotado.
+    "av>=17.1.0",
     "numpy>=1.24.0",
     "pyyaml>=6.0",
     "tqdm>=4.65.0",

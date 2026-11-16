@@ -35,6 +35,10 @@ class VideoConfig:
     skip_rate: int = 1
     output_fps: float = 15.0
     codec: str = "avc1"
+    # Calidad/velocidad del encoder H.264. Los videos de salida son para
+    # verificacion: crf alto y preset rapido pesan mucho menos.
+    crf: int = 30
+    preset: str = "veryfast"
 
 
 @dataclass
@@ -139,6 +143,8 @@ class PipelineConfig:
                 "skip_rate": self.video.skip_rate,
                 "output_fps": self.video.output_fps,
                 "codec": self.video.codec,
+                "crf": self.video.crf,
+                "preset": self.video.preset,
             },
             "detector": {
                 "backend": self.detector.backend.value,

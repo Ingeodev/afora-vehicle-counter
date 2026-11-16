@@ -214,6 +214,8 @@ class Pipeline:
                     codec=cfg.video.codec,
                     width=new_width,
                     height=new_height,
+                    crf=cfg.video.crf,
+                    preset=cfg.video.preset,
                 )
                 video_writer = AnnotatedVideoWriter.from_path(
                     output_video_path, writer_config

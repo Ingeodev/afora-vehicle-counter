@@ -107,6 +107,9 @@ def process_video(
     profile: bool = False,
     profile_path: str | None = None,
     audit: bool = False,
+    codec: str = "avc1",
+    crf: int = 30,
+    preset: str = "veryfast",
 ) -> ProcessingResult:
     import os
 
@@ -139,6 +142,9 @@ def process_video(
     # Video
     config.video.reduce_factor = reduce
     config.video.max_minutes = max_minutes
+    config.video.codec = codec
+    config.video.crf = crf
+    config.video.preset = preset
 
     # Output
     config.output.save_video = not no_video
@@ -298,7 +304,8 @@ def process_directory(
 
         for k in ("reduce", "batch_size", "pipeline_mode", "model", "backend",
                   "tracker_backend", "device", "strategy", "max_minutes",
-                  "night_enhance", "deblurring", "no_video", "output_name"):
+                  "night_enhance", "deblurring", "no_video", "codec", "crf",
+                  "preset", "output_name"):
             if k in ov and ov[k] is not None:
                 video_kwargs[k] = ov[k]
 
@@ -315,6 +322,7 @@ def process_directory(
                     "tracker_backend", "batch_size", "tracker_config",
                     "output_name", "pipeline_mode", "queue_maxsize",
                     "profile", "profile_path", "audit",
+                    "codec", "crf", "preset",
                 ]},
             )
             results.append(result)
@@ -417,6 +425,9 @@ def process_from_config(config: BatchConfig | str) -> list[ProcessingResult]:
         night_enhance=config.night_enhance,
         deblurring=config.deblurring,
         no_video=config.no_video,
+        codec=config.codec,
+        crf=config.crf,
+        preset=config.preset,
         quiet=config.quiet,
         backend=config.backend,
         tracker_backend=config.tracker,

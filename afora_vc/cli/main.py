@@ -40,6 +40,9 @@ def main():
     p.add_argument("--model-config", type=str, help="YAML con parametros del modelo")
     p.add_argument("--deblurring", action="store_true", help="Deblurring agresivo")
     p.add_argument("--no-video", action="store_true", help="No guardar video")
+    p.add_argument("--codec", default="avc1", choices=["avc1", "h264", "hevc", "h265", "mp4v"], help="Codec del video de salida")
+    p.add_argument("--crf", type=int, default=30, help="Calidad H.264/H.265 (0-51, mas alto = mas chico)")
+    p.add_argument("--preset", default="veryfast", help="Preset x264 (ultrafast, veryfast, medium, ...)")
     p.add_argument("--quiet", "-q", action="store_true", help="Modo silencioso")
     p.add_argument("--output-name", type=str, help="Nombre del video de salida")
     p.add_argument("--batch-size", type=int, default=1, help="Tamano de batch")
@@ -55,6 +58,9 @@ def main():
     r.add_argument("config", help="Ruta al archivo .yaml de configuracion")
     r.add_argument("--quiet", "-q", action="store_true", help="Modo silencioso")
     r.add_argument("--graph", choices=["none", "image", "web"], help="Tipo de grafico (sorescribe el YAML)")
+    r.add_argument("--codec", choices=["avc1", "h264", "hevc", "h265", "mp4v"], help="Codec del video (sobreescribe el YAML)")
+    r.add_argument("--crf", type=int, help="Calidad 0-51 (sobreescribe el YAML)")
+    r.add_argument("--preset", help="Preset x264 (sobreescribe el YAML)")
 
     # utils
     utils_parser = subparsers.add_parser("utils", help="Utility tools")
@@ -98,6 +104,9 @@ def main():
     s.add_argument("--quiet", "-q", action="store_true")
     s.add_argument("--batch-size", type=int, default=1)
     s.add_argument("--output-name", type=str, help="Nombre del video de salida")
+    s.add_argument("--codec", default="avc1", choices=["avc1", "h264", "hevc", "h265", "mp4v"], help="Codec del video de salida")
+    s.add_argument("--crf", type=int, default=30, help="Calidad H.264/H.265 (0-51, mas alto = mas chico)")
+    s.add_argument("--preset", default="veryfast", help="Preset x264 (ultrafast, veryfast, medium, ...)")
     s.add_argument("--tracker-config", type=str)
     s.add_argument("--base-time", "-t", default="00:00", help="Hora base (HH:MM)")
     s.add_argument("--queue-maxsize", type=int, default=4, help="Tamano maximo de cola (modo pipelined)")
@@ -164,6 +173,9 @@ def _cmd_process(args):
         profile_path=args.profile_path,
         queue_maxsize=args.queue_maxsize,
         audit=args.audit,
+        codec=args.codec,
+        crf=args.crf,
+        preset=args.preset,
     )
 
     if not args.quiet:
@@ -225,6 +237,12 @@ def _cmd_run(args):
     if args.graph is not None and config_obj.count is not None:
         import dataclasses
         config_obj.count = dataclasses.replace(config_obj.count, graph=args.graph)
+    if args.codec is not None:
+        config_obj.codec = args.codec
+    if args.crf is not None:
+        config_obj.crf = args.crf
+    if args.preset is not None:
+        config_obj.preset = args.preset
     results = process_from_config(config_obj)
     if not args.quiet:
         total = sum(r.total_detections for r in results)
@@ -266,6 +284,9 @@ def _cmd_scan(args):
         profile=args.profile,
         profile_path=args.profile_path,
         audit=args.audit,
+        codec=args.codec,
+        crf=args.crf,
+        preset=args.preset,
     )
 
     if not args.quiet:

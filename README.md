@@ -86,6 +86,9 @@ afora process video.mp4 \
 | `--deblurring` | Deblurring agresivo | `False` |
 | `--tracker` | Backend tracker: `botsort`, `bytetrack` | `botsort` |
 | `--no-video` | No guardar video de salida | `False` |
+| `--codec` | Codec del video: `avc1`/`h264`, `hevc`/`h265`, `mp4v` | `avc1` |
+| `--crf` | Calidad H.264/H.265 (0-51, más alto = más chico) | `30` |
+| `--preset` | Preset x264 (`ultrafast`, `veryfast`, `medium`, ...) | `veryfast` |
 | `--quiet, -q` | Modo silencioso | `False` |
 | `--max-minutes` | Limitar procesamiento a N minutos | — |
 | `--base-time, -t` | Hora base (HH:MM) | `00:00` |
@@ -167,6 +170,80 @@ profile: true
 audit: true
 ```
 
+#### Referencia de campos del YAML
+
+**General**
+
+| Campo | Tipo | Default | Descripción |
+|---|---|---|---|
+| `input` | `str` | — (requerido) | Carpeta raíz con los videos |
+| `output` | `str` | `./output` | Carpeta base de salida |
+| `recursive` | `bool` | `true` | Escanear subcarpetas |
+| `mask` | `str` | `null` | Máscara global (PNG) |
+| `zones` | `str` | `null` | Zonas globales (JSON) |
+| `quiet` | `bool` | `false` | Silenciar barras y paneles |
+
+**Detección y tracking**
+
+| Campo | Tipo | Default | Descripción |
+|---|---|---|---|
+| `backend` | `str` | `yolo` | `yolo`, `dfine` o `rtdetr` |
+| `model` | `str` | `models/yolov8s.pt` | Ruta al modelo |
+| `device` | `str` | auto | `cpu`, `cuda`, `mps` |
+| `strategy` | `str` | `box` | `box` o `seg` |
+| `tracker` | `str` | `botsort` | `botsort` o `bytetrack` |
+| `tracker_config` | `str` | `null` | YAML de configuración del tracker |
+| `model_config` | `str` | `null` | YAML con thresholds/clases por clase |
+| `pipeline_mode` | `str` | `sequential` | `sequential` o `pipelined` |
+| `batch_size` | `int` | `1` | Tamaño de batch (>1 activa batch mode) |
+| `queue_maxsize` | `int` | `4` | Cola máxima en modo pipelined |
+| `reduce` | `int` | `1` | Factor de reducción (2 = media resolución) |
+| `max_minutes` | `float` | `null` | Limitar a N minutos por video |
+| `night_enhance` | `bool` | `false` | Mejora nocturna |
+| `deblurring` | `bool` | `false` | Deblurring agresivo |
+
+**Video de salida**
+
+| Campo | Tipo | Default | Descripción |
+|---|---|---|---|
+| `no_video` | `bool` | `false` | No escribir video procesado |
+| `output_name` | `str` | `null` | Nombre del video de salida |
+| `codec` | `str` | `avc1` | `avc1`/`h264`, `hevc`/`h265`, `mp4v` (legacy) |
+| `crf` | `int` | `30` | Calidad 0-51 (más alto = más chico) |
+| `preset` | `str` | `veryfast` | Preset x264: `ultrafast`, `veryfast`, `medium`, ... |
+
+**Fechas y profiling**
+
+| Campo | Tipo | Default | Descripción |
+|---|---|---|---|
+| `base_time` | `str` | `00:00` | Hora base (`HH:MM`); ignorado en `.dav` |
+| `date` | `str` | `2025-01-01` | Fecha (`YYYY-MM-DD`); ignorado en `.dav` |
+| `profile` | `bool` | `false` | Habilitar profiling por paso |
+| `profile_path` | `str` | `null` | Ruta del CSV de profiling |
+| `audit` | `bool` | `false` | Auditar detecciones por etapa |
+| `overrides` | `list` | `[]` | Ajustes por video (ver más abajo) |
+| `count` | `dict` | `null` | Conteo agregado (ver "Conteo y gráficos") |
+
+#### Video de salida
+
+El video anotado se codifica con H.264 (`libx264`) usando PyAV, que trae
+FFmpeg con `libx264`/`libx265` en sus wheels. OpenCV **no** incluye `libx264`
+y por eso antes `avc1` caía a `mp4v`, generando archivos enormes.
+
+```yaml
+codec: avc1       # avc1|h264, hevc|h265 o mp4v (legacy OpenCV)
+crf: 30           # 0-51. Más alto = más chico y más rápido de escribir
+preset: veryfast  # ultrafast, superfast, veryfast, medium, slow...
+```
+
+Los videos de salida son para verificación, no para archivo final. Con
+`crf: 30` y `preset: veryfast` un clip de 1080p pesa ~6x menos que con `mp4v`
+(medido: 361 KB vs 2.3 MB en un clip de 3 s). Si necesitás más detalle en los
+overlays bajá el `crf` (por ejemplo 23).
+
+`mp4v` sigue disponible para compatibilidad, pero usa el backend legacy de
+OpenCV e ignora `crf` y `preset` (además de pesar mucho más).
+
 #### Conteo y gráficos
 
 La sección `count:` habilita el pipeline de conteo agregado por subdirectorio. Al terminar de procesar todos los videos de una carpeta, genera automáticamente un CSV agregado y un gráfico.
@@ -223,7 +300,17 @@ overrides:
     mask: C:\mask_especial.png
     reduce: 1
     batch_size: 8
+    codec: hevc
+    crf: 35
 ```
+
+Los overrides aceptan los mismos campos de video que el YAML global:
+`mask`, `zones`, `reduce`, `batch_size`, `pipeline_mode`, `model`, `backend`,
+`tracker`, `device`, `strategy`, `max_minutes`, `night_enhance`,
+`deblurring`, `no_video`, `codec`, `crf`, `preset`, `output_name`,
+`model_config`, `tracker_config`, `base_time`, `date`, `queue_maxsize`,
+`profile`, `profile_path` y `audit`. Los valores del override pisan al global
+solo para ese video.
 
 ### Agrupar detecciones (post-procesamiento)
 
@@ -269,11 +356,27 @@ result = process_video(
     output="./output",
     backend="rtdetr",
     device="cuda",
+    codec="avc1",       # avc1|h264, hevc|h265, mp4v
+    crf=30,             # 0-51, más alto = archivo más chico
+    preset="veryfast",  # preset x264
 )
 
 print(f"Detecciones: {result.total_detections}")
 print(f"Tiempo: {result.processing_time_minutes:.1f} min")
 print(f"Zonas: {result.zone_counts}")
+```
+
+Los parámetros `codec`, `crf` y `preset` también están disponibles en
+`process_directory` y en `PipelineConfig.video`:
+
+```python
+from afora_vc.application.config import PipelineConfig
+
+config = PipelineConfig()
+config.video.codec = "hevc"
+config.video.crf = 32
+config.video.preset = "ultrafast"
+config.output.save_video = True
 ```
 
 `video` también acepta una grabación DVR de Dahua: una ruta `.dav` o una lista
