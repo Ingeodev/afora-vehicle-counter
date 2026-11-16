@@ -340,6 +340,8 @@ class DisplayManager:
                 f"[{index}/{total}] {name} -> {status} "
                 f"({frames} frames, {fps:.1f} fps, {minutes:.2f} min)"
             )
+            if not self.interactive:
+                self.console.file.flush()
         else:
             self.console.print(
                 f"[{index}/{total}] {name} -> {status} ({frames} frames, {seconds:.1f}s)"
@@ -376,6 +378,8 @@ class DisplayManager:
         text.append("[OK] ", _STYLE_OK)
         text.append(message, _STYLE_OK)
         self.console.print(text)
+        if not self.interactive:
+            self.console.file.flush()
 
     def show_info(self, message: str) -> None:
         if not self.quiet:
