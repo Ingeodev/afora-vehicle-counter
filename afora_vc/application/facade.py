@@ -424,9 +424,20 @@ def process_directory(
             "Revisa los errores de arriba."
         )
     if ok_count:
-        _display.show_success(
-            f"Procesados {ok_count} videos, {total_detections} detecciones totales"
-        )
+        if quiet:
+            # Resumen compacto en modo silencioso.
+            total_frames = sum(r.frames_processed for r in results)
+            total_time = sum(r.processing_time_seconds for r in results)
+            avg_fps = total_frames / total_time if total_time > 0 else 0
+            total_min = total_time / 60
+            _display.show_success(
+                f"Procesados {ok_count} videos, {total_detections} detecciones totales "
+                f"| {avg_fps:.1f} fps promedio, {total_min:.1f} min"
+            )
+        else:
+            _display.show_success(
+                f"Procesados {ok_count} videos, {total_detections} detecciones totales"
+            )
     # Si todo fallo, el mensaje de arriba ya cubre; si no habia pendientes,
     # la seccion de reanudacion lo dice. No repetir.
 

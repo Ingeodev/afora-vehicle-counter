@@ -202,6 +202,15 @@ class DisplayManager:
         profile_path: str | None = None,
     ) -> None:
         if self.quiet:
+            # Modo silencioso: solo una linea con lo esencial.
+            minutes = processing_time / 60
+            print(
+                f"[video] {video_name} | "
+                f"{frames_processed} frames, {fps:.1f} fps, "
+                f"{total_detections} detecciones, "
+                f"{minutes:.2f} min",
+                flush=True,
+            )
             return
 
         self.console.print()
@@ -322,17 +331,26 @@ class DisplayManager:
         seconds: float = 0.0,
         ok: bool = True,
     ) -> None:
-        """Linea compacta por video, solo en entornos no interactivos.
+        """Linea compacta por video.
 
-        En una terminal real el progreso ya lo muestran las barras; en Colab o
-        CI (sin TTY) esto deja un rastro legible sin caracteres de control.
+        En modo **quiet** imprime siempre una linea de estado; en entornos sin
+        TTY (Colab/CI) también la emite; en una terminal interactiva no imprime
+        nada porque las barras ya muestran el progreso.
         """
-        if self.quiet or self.interactive:
+        if self.interactive and not self.quiet:
             return
         status = "OK" if ok else "ERROR"
-        self.console.print(
-            f"[{index}/{total}] {name} -> {status} ({frames} frames, {seconds:.1f}s)"
-        )
+        if self.quiet:
+            minutes = seconds / 60
+            fps = frames / seconds if seconds > 0 else 0
+            self.console.print(
+                f"[{index}/{total}] {name} -> {status} "
+                f"({frames} frames, {fps:.1f} fps, {minutes:.2f} min)"
+            )
+        else:
+            self.console.print(
+                f"[{index}/{total}] {name} -> {status} ({frames} frames, {seconds:.1f}s)"
+            )
 
     # ── Error display ──────────────────────────────────────
 

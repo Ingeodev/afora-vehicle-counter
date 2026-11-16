@@ -85,9 +85,16 @@ class TestVideoFinished:
         out = capsys.readouterr().out
         assert "[2/4] roto.mp4 -> ERROR (0 frames, 0.0s)" in out
 
-    @pytest.mark.parametrize("kwargs", [{"quiet": True}, {"interactive": True}])
-    def test_silent_when_quiet_or_interactive(self, capsys, kwargs):
-        display = DisplayManager(**kwargs)
+    def test_silent_only_when_interactive(self, capsys):
+        display = DisplayManager(interactive=True)
         display.video_finished(1, 1, "video.mp4", frames=10, seconds=1.0)
 
+        # En modo interactivo las barras muestran el progreso; stdout queda limpio.
         assert capsys.readouterr().out == ""
+
+    def test_quiet_still_prints_compact_line(self, capsys):
+        display = DisplayManager(quiet=True)
+        display.video_finished(1, 1, "video.mp4", frames=10, seconds=1.0)
+
+        out = capsys.readouterr().out
+        assert "[1/1] video.mp4 -> OK (10 frames, 10.0 fps, 0.02 min)" in out

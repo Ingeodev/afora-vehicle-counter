@@ -328,6 +328,8 @@ def _cmd_run(args):
         config_obj.crf = args.crf
     if args.preset is not None:
         config_obj.preset = args.preset
+    if getattr(args, "quiet", False):
+        config_obj.quiet = True
     failures: list[tuple[str, str]] = []
     results = process_from_config(
         config_obj, resume=not args.no_resume, failures=failures
