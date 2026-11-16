@@ -202,15 +202,8 @@ class DisplayManager:
         profile_path: str | None = None,
     ) -> None:
         if self.quiet:
-            # Modo silencioso: solo una linea con lo esencial.
-            minutes = processing_time / 60
-            print(
-                f"[video] {video_name} | "
-                f"{frames_processed} frames, {fps:.1f} fps, "
-                f"{total_detections} detecciones, "
-                f"{minutes:.2f} min",
-                flush=True,
-            )
+            # En quiet la linea por video ya la imprime video_finished en la
+            # facade; aca no repetimos.
             return
 
         self.console.print()
