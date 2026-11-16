@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 
 from ..domain.schemas import Detection, ZoneConfig
-from ..application.config import VisualizationConfig
+from ..application.config import VisualizationConfig, _LABEL_FONT_SIZES
 
 
 def _hex_to_bgr(h: str) -> tuple[int, int, int]:
@@ -40,15 +40,23 @@ ZONE_COLORS = [
     _hex_to_bgr("#7839C0"),
 ]
 
-# Colores por defecto por clase si no se configuran en el YAML.
 DEFAULT_CLASS_COLORS: dict[str, tuple[int, int, int]] = {
-    "car": _hex_to_bgr("#FFFF00"),         # Amarillo
-    "truck": _hex_to_bgr("#FF0000"),       # Rojo puro
-    "bus": _hex_to_bgr("#FFFFFF"),         # Blanco
-    "motorcycle": _hex_to_bgr("#FF00FF"),  # Magenta
-    "bicycle": _hex_to_bgr("#00FF00"),     # Verde lima
-    "person": _hex_to_bgr("#00FFFF"),      # Cian
+    "car": (0, 165, 255),       # Naranja
+    "truck": (0, 100, 255),     # Naranja oscuro
+    "bus": (0, 255, 255),       # Amarillo
+    "motorcycle": (255, 0, 0),  # Azul
+    "bicycle": (0, 255, 0),     # Verde
+    "person": (255, 255, 255),  # Blanco
 }
+
+
+def _render_label(template: str, detection: Detection, zones: list[str] | None) -> str:
+    """Renderiza un template de label con las variables del detection."""
+    text = template
+    text = text.replace("$id", str(detection.track_id))
+    text = text.replace("$class", detection.class_name)
+    text = text.replace("$zones", ",".join(zones) if zones else "")
+    return text
 
 
 class Visualizer:
@@ -60,7 +68,6 @@ class Visualizer:
         self.font = cv2.FONT_HERSHEY_SIMPLEX
 
     def _get_class_color(self, class_name: str) -> tuple[int, int, int]:
-        """Color por clase de vehiculo."""
         colors = self.cfg.class_colors or DEFAULT_CLASS_COLORS
         return colors.get(class_name, (255, 255, 255))
 
@@ -102,6 +109,32 @@ class Visualizer:
             cv2.addWeighted(overlay, a, frame, 1 - a, 0, frame)
         return frame
 
+    def _draw_label(self, frame: np.ndarray, text: str, pos: tuple[int, int], color: tuple[int, int, int]) -> None:
+        """Dibuja texto con fondo semitransparente multilinea."""
+        scale, thick = _LABEL_FONT_SIZES.get(self.cfg.label_font_size, _LABEL_FONT_SIZES["s"])
+        lines = text.split("\n")
+
+        # Calcular dimensiones del bloque de texto.
+        line_h = int(scale * 25) + 4
+        max_w = 0
+        for line in lines:
+            w, _ = cv2.getTextSize(line, self.font, scale, thick)[0]
+            max_w = max(max_w, w)
+
+        total_h = line_h * len(lines)
+        bg_padding = 4
+        x0, y0 = pos[0] - bg_padding, pos[1] - total_h - bg_padding + line_h - 4
+
+        # Fondo semitransparente.
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (x0, y0), (x0 + max_w + bg_padding * 2, y0 + total_h + bg_padding), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, self.cfg.label_bg_alpha, frame, 1 - self.cfg.label_bg_alpha, 0, frame)
+
+        # Texto.
+        for i, line in enumerate(lines):
+            y = y0 + line_h * (i + 1) - 2
+            cv2.putText(frame, line, (x0 + bg_padding, y), self.font, scale, color, thick)
+
     def draw_detection(
         self,
         frame: np.ndarray,
@@ -113,10 +146,9 @@ class Visualizer:
         class_color = self._get_class_color(detection.class_name)
         counted = bool(zones_visited)
         color = self._get_color(counted)
-        num_zones = len(zones_visited) if zones_visited else 0
-        alpha = self._get_alpha(num_zones)
 
         x1, y1, x2, y2 = bbox.x1, bbox.y1, bbox.x2, bbox.y2
+        cx, cy = detection.center
 
         # ── BBox ──────────────────────────────────────────
         if self.cfg.draw_bbox:
@@ -124,50 +156,54 @@ class Visualizer:
             if sub_frame.size > 0:
                 sub_overlay = sub_frame.copy()
                 cv2.rectangle(sub_overlay, (0, 0), (sub_frame.shape[1], sub_frame.shape[0]), color, cv2.FILLED)
-                blended = cv2.addWeighted(sub_overlay, alpha * 0.35, sub_frame, 1 - alpha * 0.35, 0)
+                blended = cv2.addWeighted(sub_overlay, self.cfg.bbox_alpha * 0.35, sub_frame, 1 - self.cfg.bbox_alpha * 0.35, 0)
                 sub_frame[:] = blended
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, self.cfg.bbox_thickness)
 
         # ── Centro ────────────────────────────────────────
         if self.cfg.draw_center:
-            cx, cy = detection.center
             center_color = self.cfg.center_color or DEFAULT_CENTER_COLOR
             cv2.circle(frame, (cx, cy), self.cfg.center_radius, center_color, -1)
 
-        # ── Class label ──────────────────────────────────
+        # ── Label con template ───────────────────────────
         if self.cfg.draw_class_label:
-            label = f"{detection.class_name}-{detection.track_id}"
+            label_text = _render_label(self.cfg.label_template, detection, zones_visited)
+            ref = self.cfg.label_reference
             anchor = self.cfg.label_anchor
-            scale = self.cfg.label_scale
-            thick = self.cfg.label_thickness
-            if anchor == "above_bbox":
-                pos = (x1, y1 - 5)
-            elif anchor == "below_bbox":
-                text_h = int(scale * 20) + 8
-                pos = (x1, y2 + text_h)
-            elif anchor == "center":
-                cx, cy = detection.center
-                pos = (cx, cy)
-            else:
-                pos = (x1, y1 - 5)
-            cv2.putText(
-                frame, label, pos, self.font, scale, class_color, thick
-            )
+            off = self.cfg.label_offset
 
-        # ── Zones visited (texto sobre el bbox) ──────────
-        if zones_visited and self.cfg.draw_class_label:
-            zones_text = ",".join(zones_visited)
-            text_size = cv2.getTextSize(zones_text, self.font, scale * 2, 2)[0]
-            text_x = (x1 + x2 - text_size[0]) // 2
-            text_y = y1 + text_size[1] + 4
-            cv2.putText(
-                frame, zones_text, (text_x, text_y),
-                self.font, scale * 2, class_color, 3,
-            )
+            if ref == "center":
+                base_x, base_y = cx, cy
+            else:
+                # bbox: punto medio del borde superior/inferior.
+                base_x = (x1 + x2) // 2
+                base_y = y1 if anchor in ("above",) else y2
+
+            if ref == "center":
+                if anchor == "above":
+                    pos = (base_x, base_y - off)
+                elif anchor == "below":
+                    pos = (base_x, base_y + off)
+                elif anchor == "left":
+                    pos = (base_x - off, base_y)
+                else:
+                    pos = (base_x + off, base_y)
+            else:
+                # bbox: above/below del borde.
+                if anchor == "above":
+                    pos = (x1, y1 - off)
+                elif anchor == "below":
+                    pos = (x1, y2 + off + 16)
+                elif anchor == "left":
+                    pos = (x1 - off, y1)
+                else:
+                    pos = (x2 + off, y1)
+
+            self._draw_label(frame, label_text, pos, class_color)
 
         # ── Trayectoria ──────────────────────────────────
         if self.cfg.draw_trajectory and trajectory is not None and len(trajectory) > 0:
-            traj_color = class_color if self.cfg.trajectory_class_colors else self.cfg.trajectory_color if hasattr(self.cfg, 'trajectory_color') else (255, 0, 0)
+            traj_color = class_color if self.cfg.trajectory_class_colors else (255, 0, 0)
             cv2.polylines(
                 frame, [trajectory], False,
                 traj_color, self.cfg.trajectory_thickness,

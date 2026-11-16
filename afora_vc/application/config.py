@@ -96,16 +96,33 @@ class VisualizationConfig:
         "person": (255, 255, 255),  # Blanco
     })
 
-    # Posicion del label de clase: "above_bbox", "below_bbox", "center".
-    label_anchor: str = "above_bbox"
-    label_scale: float = 0.5
+    # Label: template con variables $id, $class, $zones.
+    # Ejemplo: "$id-$zones\n$class" → "42-ZA,ZB\ncar"
+    label_template: str = "$id-$zones\n$class"
+    # Referencia para posicionar: "bbox" o "center".
+    label_reference: str = "bbox"
+    # Anchor relativo a la referencia: "above", "below", "left", "right".
+    label_anchor: str = "above"
+    label_offset: int = 5  # Pixeles de separacion respecto a la referencia.
+    # Tamano de fuente: "xs", "s", "m", "l".
+    label_font_size: str = "s"
     label_thickness: int = 2
+    label_bg_alpha: float = 0.5  # Transparencia del fondo del label.
 
     # Zonas: "fill" (poligono relleno), "outline" (solo borde), "both".
     zone_render_mode: str = "both"
     zone_alpha: float = 0.3
     # Como detectar si un vehiculo entro en una zona: "center" o "bbox".
     zone_detection_mode: str = "center"
+
+
+# Mapas de tamaño de fuente a escala y grosor.
+_LABEL_FONT_SIZES: dict[str, tuple[float, int]] = {
+    "xs": (0.35, 1),
+    "s": (0.5, 2),
+    "m": (0.7, 2),
+    "l": (1.0, 3),
+}
 
 
 @dataclass
@@ -251,9 +268,13 @@ class PipelineConfig:
                     "trajectory_thickness": self.output.visualization.trajectory_thickness,
                     "trajectory_max_points": self.output.visualization.trajectory_max_points,
                     "trajectory_class_colors": self.output.visualization.trajectory_class_colors,
+                    "label_template": self.output.visualization.label_template,
+                    "label_reference": self.output.visualization.label_reference,
                     "label_anchor": self.output.visualization.label_anchor,
-                    "label_scale": self.output.visualization.label_scale,
+                    "label_offset": self.output.visualization.label_offset,
+                    "label_font_size": self.output.visualization.label_font_size,
                     "label_thickness": self.output.visualization.label_thickness,
+                    "label_bg_alpha": self.output.visualization.label_bg_alpha,
                     "zone_render_mode": self.output.visualization.zone_render_mode,
                     "zone_alpha": self.output.visualization.zone_alpha,
                     "zone_detection_mode": self.output.visualization.zone_detection_mode,
