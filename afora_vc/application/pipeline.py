@@ -45,12 +45,14 @@ def _write_frame(
     vehicle_tracker: VehicleTracker,
 ) -> None:
     frame = fd.frame.copy()
-    if out_cfg.draw_zones and zone_manager:
+    viz = out_cfg.visualization
+
+    if viz.draw_zones and zone_manager:
         visualizer.draw_zones(frame, zone_manager.zones)
     for det in detections:
         zones_visited = zone_manager.get_zones_for_vehicle(det.track_id)
         trajectory = vehicle_tracker.get_trajectory_array(
-            det.track_id, out_cfg.max_trajectory_points
+            det.track_id, viz.trajectory_max_points
         )
         visualizer.draw_detection(frame, det, zones_visited, trajectory)
     stats = {
@@ -100,7 +102,7 @@ class Pipeline:
         self.writer = storage_writer or LocalStorageWriter()
         self.zone_manager = ZoneManager()
         self.mask_manager = MaskManager()
-        self.visualizer = Visualizer()
+        self.visualizer = Visualizer(config.output.visualization)
         self.csv_exporter = CSVExporter(self.writer)
 
     def process_video(

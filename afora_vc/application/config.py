@@ -62,6 +62,53 @@ class TrackerConfig:
 
 
 @dataclass
+class VisualizationConfig:
+    """Configuracion granular de que y como renderizar en el video de salida."""
+    # Que elementos renderizar.
+    draw_bbox: bool = False
+    draw_center: bool = True
+    draw_trajectory: bool = True
+    draw_class_label: bool = False
+    draw_zones: bool = False
+    draw_zone_labels: bool = True
+    draw_stats: bool = False
+
+    # Estilo del bbox.
+    bbox_thickness: int = 2
+    bbox_alpha: float = 0.15  # Transparencia del relleno.
+
+    # Estilo del punto central.
+    center_radius: int = 5
+    center_color: tuple[int, int, int] | None = None  # None = amarillo por defecto.
+
+    # Estilo de la trayectoria.
+    trajectory_thickness: int = 2
+    trajectory_max_points: int = 30
+    trajectory_class_colors: bool = True  # Usar color por clase de vehiculo.
+
+    # Colores por clase (BGR). Se usa si trajectory_class_colors = True.
+    class_colors: dict[str, tuple[int, int, int]] = field(default_factory=lambda: {
+        "car": (0, 165, 255),       # Naranja
+        "truck": (0, 100, 255),     # Naranja oscuro
+        "bus": (0, 255, 255),       # Amarillo
+        "motorcycle": (255, 0, 0),  # Azul
+        "bicycle": (0, 255, 0),     # Verde
+        "person": (255, 255, 255),  # Blanco
+    })
+
+    # Posicion del label de clase: "above_bbox", "below_bbox", "center".
+    label_anchor: str = "above_bbox"
+    label_scale: float = 0.5
+    label_thickness: int = 2
+
+    # Zonas: "fill" (poligono relleno), "outline" (solo borde), "both".
+    zone_render_mode: str = "both"
+    zone_alpha: float = 0.3
+    # Como detectar si un vehiculo entro en una zona: "center" o "bbox".
+    zone_detection_mode: str = "center"
+
+
+@dataclass
 class OutputConfig:
     output_folder: str = "./output"
     save_video: bool = True
@@ -71,6 +118,7 @@ class OutputConfig:
     max_trajectory_points: int = 20
     progress_interval: int = 100
     verbose: bool = True
+    visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
 
 
 @dataclass
@@ -109,6 +157,21 @@ class PipelineConfig:
         output_data = data.get("output", {})
         batch_data = data.get("batch", {})
 
+        # Extract visualization sub-config if present.
+        viz_data = output_data.pop("visualization", {})
+        if viz_data:
+            # class_colors en YAML es dict[str, str] con hex colors; convertir a BGR.
+            raw_colors = viz_data.get("class_colors", {})
+            if raw_colors:
+                from ..output.visualizer import _hex_to_bgr
+                viz_data["class_colors"] = {
+                    k: _hex_to_bgr(v) if isinstance(v, str) else tuple(v)
+                    for k, v in raw_colors.items()
+                }
+            visualization = VisualizationConfig(**viz_data)
+        else:
+            visualization = VisualizationConfig()
+
         # Convert string backend to enum
         if "backend" in detector_data and isinstance(detector_data["backend"], str):
             detector_data["backend"] = DetectorBackend(detector_data["backend"])
@@ -125,7 +188,7 @@ class PipelineConfig:
             detector=DetectorConfig(**detector_data),
             tracker=TrackerConfig(**tracker_data),
             preprocess=PreprocessConfig(**preprocess_data),
-            output=OutputConfig(**output_data),
+            output=OutputConfig(**output_data, visualization=visualization),
             batch=BatchConfig(**batch_data),
         )
 
@@ -174,6 +237,27 @@ class PipelineConfig:
                 "max_trajectory_points": self.output.max_trajectory_points,
                 "progress_interval": self.output.progress_interval,
                 "verbose": self.output.verbose,
+                "visualization": {
+                    "draw_bbox": self.output.visualization.draw_bbox,
+                    "draw_center": self.output.visualization.draw_center,
+                    "draw_trajectory": self.output.visualization.draw_trajectory,
+                    "draw_class_label": self.output.visualization.draw_class_label,
+                    "draw_zones": self.output.visualization.draw_zones,
+                    "draw_zone_labels": self.output.visualization.draw_zone_labels,
+                    "draw_stats": self.output.visualization.draw_stats,
+                    "bbox_thickness": self.output.visualization.bbox_thickness,
+                    "bbox_alpha": self.output.visualization.bbox_alpha,
+                    "center_radius": self.output.visualization.center_radius,
+                    "trajectory_thickness": self.output.visualization.trajectory_thickness,
+                    "trajectory_max_points": self.output.visualization.trajectory_max_points,
+                    "trajectory_class_colors": self.output.visualization.trajectory_class_colors,
+                    "label_anchor": self.output.visualization.label_anchor,
+                    "label_scale": self.output.visualization.label_scale,
+                    "label_thickness": self.output.visualization.label_thickness,
+                    "zone_render_mode": self.output.visualization.zone_render_mode,
+                    "zone_alpha": self.output.visualization.zone_alpha,
+                    "zone_detection_mode": self.output.visualization.zone_detection_mode,
+                },
             },
             "batch": {
                 "enabled": self.batch.enabled,

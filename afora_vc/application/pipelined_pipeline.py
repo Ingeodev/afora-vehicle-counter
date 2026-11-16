@@ -51,7 +51,7 @@ class PipelinedPipeline:
         self.writer = storage_writer or LocalStorageWriter()
         self.zone_manager = ZoneManager()
         self.mask_manager = MaskManager()
-        self.visualizer = Visualizer()
+        self.visualizer = Visualizer(config.output.visualization)
         self.csv_exporter = CSVExporter(self.writer)
 
     def process_video(
