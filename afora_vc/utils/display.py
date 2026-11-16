@@ -368,7 +368,14 @@ class DisplayManager:
 
     def show_info(self, message: str) -> None:
         if not self.quiet:
-            self.console.print(message, style=_STYLE_INFO)
+            if not self.interactive:
+                # En Colab/CI rich puede bufferizar; flush explicito evita que
+                # el comando parezca colgado durante operaciones lentas (scan
+                # de Drive por FUSE, descarga de modelos, etc.).
+                self.console.print(message, style=_STYLE_INFO)
+                self.console.file.flush()
+            else:
+                self.console.print(message, style=_STYLE_INFO)
 
     # ── Audit report ───────────────────────────────────────
 

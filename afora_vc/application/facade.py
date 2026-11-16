@@ -262,7 +262,7 @@ def process_directory(
     # escaneo puede tardar minutos y parecia que el comando estaba colgado.
     _display.show_info(f"Escaneando {root_path} ...")
     scan_start = time.monotonic()
-    last_scan_report = [scan_start]
+    last_scan_report = [0.0]  # 0 → el primer reporte siempre se imprime de entrada
 
     def _report_scan(directories: int, videos: int) -> None:
         now = time.monotonic()
