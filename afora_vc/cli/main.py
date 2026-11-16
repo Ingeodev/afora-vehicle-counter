@@ -2,6 +2,7 @@ import logging
 import os
 import sys
 
+from .. import __version__
 from ..application.facade import process_video, process_directory, process_from_config, check_config
 from ..application.batch_config import BatchConfig
 from ..domain.exceptions import AforosError
@@ -11,6 +12,8 @@ from ..output.count_exporter import DefaultFlowExporter
 from ..utilities.video_sorter import sort_videos_by_date, rollback_sort
 from ..utils.display import DisplayManager
 
+
+logger = logging.getLogger(__name__)
 
 _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 _LOG_DATE_FORMAT = "%H:%M:%S"
@@ -34,6 +37,22 @@ def _configure_logging(level: str = "WARNING", verbose: bool = False) -> None:
     )
 
 
+def _print_startup(config_path: str) -> None:
+    """Primera salida del comando, antes de cualquier I/O.
+
+    El escaneo de una carpeta grande (o de Google Drive montado en Colab)
+    puede tardar minutos; sin esto la celda parece no estar ejecutando nada.
+    Incluye la ruta del paquete instalado para detectar copias viejas.
+    """
+    package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    print(
+        f"afora {__version__} | python {sys.version.split()[0]} | {package_dir}",
+        flush=True,
+    )
+    print(f"Config: {os.path.abspath(config_path)}", flush=True)
+    logger.info("Version %s desde %s", __version__, package_dir)
+
+
 def main():
     import argparse
 
@@ -53,6 +72,9 @@ def main():
         description="Contador de vehiculos multi-backend",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         parents=[log_parent],
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"afora {__version__}"
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Comandos disponibles")
@@ -288,8 +310,15 @@ def _cmd_group(args):
 
 
 def _cmd_run(args):
+    _print_startup(args.config)
     config_obj = BatchConfig.from_yaml(args.config)
     config_obj._source_path = os.path.abspath(args.config)
+    print(
+        f"Input:  {os.path.abspath(config_obj.input)}\n"
+        f"Output: {os.path.abspath(config_obj.output)}\n"
+        f"Reanudacion: {'desactivada (--no-resume)' if args.no_resume else 'activa (progress.csv)'}",
+        flush=True,
+    )
     if args.graph is not None and config_obj.count is not None:
         import dataclasses
         config_obj.count = dataclasses.replace(config_obj.count, graph=args.graph)
@@ -299,13 +328,21 @@ def _cmd_run(args):
         config_obj.crf = args.crf
     if args.preset is not None:
         config_obj.preset = args.preset
-    results = process_from_config(config_obj, resume=not args.no_resume)
+    failures: list[tuple[str, str]] = []
+    results = process_from_config(
+        config_obj, resume=not args.no_resume, failures=failures
+    )
     if not args.quiet:
         total = sum(r.total_detections for r in results)
-        print(f"Completados {len(results)} videos, {total} detecciones totales")
+        detalle = f" ({len(failures)} con error)" if failures else ""
+        print(
+            f"Completados {len(results)} videos{detalle}, "
+            f"{total} detecciones totales",
+            flush=True,
+        )
         if config_obj.count and config_obj.count.graph != "none":
-            print(f"Grafico: {config_obj.count.graph}")
-    return 0
+            print(f"Grafico: {config_obj.count.graph}", flush=True)
+    return 1 if failures else 0
 
 
 def _cmd_check(args):
@@ -314,6 +351,7 @@ def _cmd_check(args):
 
 
 def _cmd_scan(args):
+    failures: list[tuple[str, str]] = []
     results = process_directory(
         root_path=args.directory,
         output_base=args.output,
@@ -343,12 +381,18 @@ def _cmd_scan(args):
         codec=args.codec,
         crf=args.crf,
         preset=args.preset,
+        failures=failures,
     )
 
     if not args.quiet:
         total = sum(r.total_detections for r in results)
-        print(f"Completados {len(results)} videos, {total} detecciones totales")
-    return 0
+        detalle = f" ({len(failures)} con error)" if failures else ""
+        print(
+            f"Completados {len(results)} videos{detalle}, "
+            f"{total} detecciones totales",
+            flush=True,
+        )
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

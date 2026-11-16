@@ -342,7 +342,17 @@ class DisplayManager:
         if context:
             text.append(f" [{context}]", _STYLE_DIM)
         text.append(f": {message}", _STYLE_INFO)
-        self._err_console.print(text)
+        self._error_console.print(text)
+
+    @property
+    def _error_console(self) -> Console:
+        """Consola para errores.
+
+        En una terminal van a stderr (convencion Unix), pero en Colab/CI stderr
+        no siempre se muestra: ahi el error tiene que quedar en stdout o el
+        comando parece no haber hecho nada.
+        """
+        return self.console if not self.interactive else self._err_console
 
     def show_warning(self, message: str) -> None:
         text = Text()

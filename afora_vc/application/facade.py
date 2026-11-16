@@ -1,6 +1,7 @@
 import os
 import logging
 import threading
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional, Literal, Sequence
@@ -29,6 +30,9 @@ from .batch_config import BatchConfig, VideoOverride
 
 
 logger = logging.getLogger(__name__)
+
+# Cada cuanto se informa el avance del escaneo (segundos).
+_SCAN_REPORT_INTERVAL = 5.0
 
 
 def _build_pipeline(
@@ -243,6 +247,7 @@ def process_directory(
     progress_tracker: ProgressTracker | None = None,
     count_config=None,
     count_resolver: VehicleClassesResolver | None = None,
+    failures: list[tuple[str, str]] | None = None,
     **kwargs,
 ) -> list[ProcessingResult]:
     reader = LocalStorageReader()
@@ -250,10 +255,27 @@ def process_directory(
     overrides = overrides or {}
     skip_paths = skip_paths or set()
 
-    scan_result = _scan_directory(root_path, reader, recursive)
-
     quiet = kwargs.get("quiet", False)
     _display = DisplayManager(verbose=not quiet, quiet=quiet)
+
+    # Avisar ANTES de escanear: con carpetas grandes (o Drive montado) el
+    # escaneo puede tardar minutos y parecia que el comando estaba colgado.
+    _display.show_info(f"Escaneando {root_path} ...")
+    scan_start = time.monotonic()
+    last_scan_report = [scan_start]
+
+    def _report_scan(directories: int, videos: int) -> None:
+        now = time.monotonic()
+        if now - last_scan_report[0] < _SCAN_REPORT_INTERVAL:
+            return
+        last_scan_report[0] = now
+        _display.show_info(
+            f"Escaneando... {directories} carpetas, {videos} videos "
+            f"({now - scan_start:.0f}s)"
+        )
+
+    scan_result = _scan_directory(root_path, reader, recursive, on_progress=_report_scan)
+
     total_videos = len(scan_result)
     pending = [e for e in scan_result if e["path"] not in skip_paths]
     skipped_count = total_videos - len(pending)
@@ -263,7 +285,10 @@ def process_directory(
             f"Procesados previamente: {skipped_count} videos (saltados). "
             "Borra progress.csv para reprocesar."
         )
-    _display.show_info(f"Escaneando: {root_path} -- {len(pending)} pendientes de {total_videos}")
+    _display.show_info(
+        f"Escaneo listo en {time.monotonic() - scan_start:.1f}s: "
+        f"{len(pending)} pendientes de {total_videos}"
+    )
 
     if not pending:
         _display.show_success("Todos los videos ya fueron procesados")
@@ -368,6 +393,8 @@ def process_directory(
             _display.video_finished(
                 i, len(pending), video_name, ok=False
             )
+            if failures is not None:
+                failures.append((video_name, str(e)))
         finally:
             _display.stop_video_progress()
             _display.update_scan(advance=1)
@@ -388,8 +415,20 @@ def process_directory(
     _display.stop_scan()
 
     total_detections = sum(r.total_detections for r in results)
-    all_count = len(pending)
-    _display.show_success(f"Procesados {all_count} videos, {total_detections} detecciones totales")
+    ok_count = len(results)
+    failed_count = len(failures) if failures is not None else 0
+
+    if failed_count:
+        _display.show_error(
+            f"{failed_count} de {ok_count + failed_count} videos fallaron. "
+            "Revisa los errores de arriba."
+        )
+    if ok_count:
+        _display.show_success(
+            f"Procesados {ok_count} videos, {total_detections} detecciones totales"
+        )
+    # Si todo fallo, el mensaje de arriba ya cubre; si no habia pendientes,
+    # la seccion de reanudacion lo dice. No repetir.
 
     for t in count_threads:
         t.join()
@@ -410,7 +449,9 @@ def _run_count_pipeline(count_config, out_dir, dir_key, resolver):
 
 
 def process_from_config(
-    config: BatchConfig | str, resume: bool = True
+    config: BatchConfig | str,
+    resume: bool = True,
+    failures: list[tuple[str, str]] | None = None,
 ) -> list[ProcessingResult]:
     config_path: str | None = None
     if isinstance(config, str):
@@ -452,6 +493,7 @@ def process_from_config(
         progress_tracker=progress_tracker,
         count_config=config.count,
         count_resolver=resolver,
+        failures=failures,
         device=config.device,
         model=config.model,
         reduce=config.reduce,
@@ -484,18 +526,29 @@ def _scan_directory(
     root_path: str,
     reader: "LocalStorageReader",
     recursive: bool = True,
+    on_progress: Any = None,
 ) -> list[dict]:
     entries: list[dict] = []
     dvr_files: list[str] = []
     date_assets: dict[str, tuple[str | None, str | None]] = {}
     root_assets: tuple[str | None, str | None] = (None, None)
 
+    if not os.path.isdir(root_path):
+        raise ConfigurationError(
+            f"La carpeta de entrada no existe: {root_path}. "
+            "Revisa la ruta en el YAML y, en Colab, que Drive este montado."
+        )
+
     paths_to_scan = [root_path]
     first_dir = True
+    scanned_dirs = 0
 
     while paths_to_scan:
         current = paths_to_scan.pop(0)
         files = reader.list_files(current, "*")
+        scanned_dirs += 1
+        if on_progress is not None:
+            on_progress(scanned_dirs, len(entries) + len(dvr_files))
 
         mask_path = None
         zones_path = None

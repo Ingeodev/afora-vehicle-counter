@@ -1,12 +1,32 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any, Literal
 
 import yaml
 
 from ..domain.counting.entities import CountConfig, CountGroupConfig
+from ..domain.exceptions import ConfigurationError
+
+
+def _check_unknown_keys(
+    data: dict[str, Any], dataclass_type: type, origin: str, skip: set[str] | None = None
+) -> None:
+    """Falla con un mensaje util ante un typo en el YAML.
+
+    Sin esto, un campo mal escrito termina en
+    ``BatchConfig.__init__() got an unexpected keyword argument``, que no dice
+    ni donde ni cual es la alternativa valida.
+    """
+    skip = skip or set()
+    valid = {f.name for f in fields(dataclass_type)} - skip
+    unknown = sorted(set(data) - valid - skip)
+    if unknown:
+        raise ConfigurationError(
+            f"Campo(s) desconocido(s) en {origin}: {', '.join(unknown)}. "
+            f"Validos: {', '.join(sorted(valid))}"
+        )
 
 
 @dataclass
@@ -83,18 +103,37 @@ class BatchConfig:
 
     @classmethod
     def from_yaml(cls, path: str) -> BatchConfig:
-        with open(path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-        return cls.from_dict(data)
+        if not os.path.isfile(path):
+            raise ConfigurationError(
+                f"No existe el archivo de configuracion: {path}"
+            )
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            raise ConfigurationError(f"Error de sintaxis YAML en {path}: {e}") from e
+        config = cls.from_dict(data)
+        # Deja la ruta del YAML en el objeto: process_from_config la usa para
+        # ubicar progress.csv (reanudacion) aunque se pase el objeto directo.
+        config._source_path = os.path.abspath(path)
+        return config
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BatchConfig:
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            raise ConfigurationError(
+                f"El YAML debe ser un mapa de campos, no {type(data).__name__}"
+            )
+        data = dict(data)
         ov_data = data.pop("overrides", [])
         overrides = []
         for item in ov_data:
             if isinstance(item, str):
                 overrides.append(VideoOverride(path=item))
             elif isinstance(item, dict):
+                _check_unknown_keys(item, VideoOverride, "un override")
                 overrides.append(VideoOverride(**item))
 
         count_data = data.pop("count", None)
@@ -102,6 +141,7 @@ class BatchConfig:
         if count_data is not None:
             count_config = cls._parse_count(count_data)
 
+        _check_unknown_keys(data, cls, "el YAML")
         return cls(overrides=overrides, count=count_config, **data)
 
     @staticmethod
