@@ -147,12 +147,14 @@ class PipelinedPipeline:
 
                 output_video_path = f"{output_folder}/{output_name}"
 
-                # Writer usa dimensiones originales del video.
+                # Writer configurado con dimensiones de SALIDA (no originales).
+                out_w = video.width // reduce_factor
+                out_h = video.height // reduce_factor
                 writer_config = VideoWriterConfig(
                     fps=cfg.video.output_fps,
                     codec=cfg.video.codec,
-                    width=video.width,
-                    height=video.height,
+                    width=out_w,
+                    height=out_h,
                     crf=cfg.video.crf,
                     preset=cfg.video.preset,
                 )
@@ -163,10 +165,10 @@ class PipelinedPipeline:
             frames_processed = 0
             start_time = time.time()
 
-            # Tamano de salida para el resize en _write_frame.
-            out_size: tuple[int, int] | None = None
-            if reduce_factor > 1:
-                out_size = (video.width // reduce_factor, video.height // reduce_factor)
+            # Tamano de salida: siempre igual al writer para que frames coincidan.
+            out_w = video.width // reduce_factor
+            out_h = video.height // reduce_factor
+            out_size: tuple[int, int] = (out_w, out_h)
 
             from ..adapters.preprocessors.noop import NoOpPreprocessor
             from ..adapters.preprocessors.deblurring import DeblurringPreprocessor

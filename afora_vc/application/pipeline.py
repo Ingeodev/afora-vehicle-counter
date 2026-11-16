@@ -210,13 +210,14 @@ class Pipeline:
 
                 output_video_path = f"{output_folder}/{output_name}"
 
-                # Writer usa dimensiones originales del video.
-                # El resize a resolucion de salida se hace en _write_frame.
+                # Writer configurado con dimensiones de SALIDA.
+                out_w = video.width // reduce_factor
+                out_h = video.height // reduce_factor
                 writer_config = VideoWriterConfig(
                     fps=cfg.video.output_fps,
                     codec=cfg.video.codec,
-                    width=video.width,
-                    height=video.height,
+                    width=out_w,
+                    height=out_h,
                     crf=cfg.video.crf,
                     preset=cfg.video.preset,
                 )
@@ -227,10 +228,10 @@ class Pipeline:
             frames_processed = 0
             start_time = time.time()
 
-            # Tamano de salida para el resize en _write_frame.
-            out_size: tuple[int, int] | None = None
-            if reduce_factor > 1:
-                out_size = (video.width // reduce_factor, video.height // reduce_factor)
+            # Tamano de salida: siempre igual al writer para que frames coincidan.
+            out_w = video.width // reduce_factor
+            out_h = video.height // reduce_factor
+            out_size: tuple[int, int] = (out_w, out_h)
 
             # Preprocessors
             from ..adapters.preprocessors.noop import NoOpPreprocessor
