@@ -82,7 +82,7 @@ class VisualizationConfig:
     center_color: tuple[int, int, int] | None = None  # None = amarillo por defecto.
 
     # Estilo de la trayectoria.
-    trajectory_thickness: int = 3
+    trajectory_thickness: int = 6
     trajectory_max_points: int = 30
     trajectory_class_colors: bool = True  # Usar color por clase de vehiculo.
 
@@ -118,10 +118,10 @@ class VisualizationConfig:
 
 # Mapas de tamaño de fuente a escala y grosor.
 _LABEL_FONT_SIZES: dict[str, tuple[float, int]] = {
-    "xs": (0.35, 1),
-    "s": (0.5, 2),
-    "m": (0.7, 2),
-    "l": (1.0, 3),
+    "xs": (0.7, 2),
+    "s": (1.0, 4),
+    "m": (1.4, 4),
+    "l": (2.0, 6),
 }
 
 
