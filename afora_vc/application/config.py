@@ -68,8 +68,8 @@ class VisualizationConfig:
     draw_bbox: bool = False
     draw_center: bool = True
     draw_trajectory: bool = True
-    draw_class_label: bool = False
-    draw_zones: bool = False
+    draw_class_label: bool = True
+    draw_zones: bool = True
     draw_zone_labels: bool = True
     draw_stats: bool = False
 
@@ -82,7 +82,7 @@ class VisualizationConfig:
     center_color: tuple[int, int, int] | None = None  # None = amarillo por defecto.
 
     # Estilo de la trayectoria.
-    trajectory_thickness: int = 2
+    trajectory_thickness: int = 3
     trajectory_max_points: int = 30
     trajectory_class_colors: bool = True  # Usar color por clase de vehiculo.
 
@@ -100,12 +100,12 @@ class VisualizationConfig:
     # Ejemplo: "$id-$zones\n$class" → "42-ZA,ZB\ncar"
     label_template: str = "$id-$zones\n$class"
     # Referencia para posicionar: "bbox" o "center".
-    label_reference: str = "bbox"
+    label_reference: str = "center"
     # Anchor relativo a la referencia: "above", "below", "left", "right".
     label_anchor: str = "above"
-    label_offset: int = 5  # Pixeles de separacion respecto a la referencia.
+    label_offset: int = 10  # Pixeles de separacion respecto a la referencia.
     # Tamano de fuente: "xs", "s", "m", "l".
-    label_font_size: str = "s"
+    label_font_size: str = "m"
     label_thickness: int = 2
     label_bg_alpha: float = 0.5  # Transparencia del fondo del label.
 
