@@ -15,7 +15,7 @@ def _hex_to_bgr(h: str) -> tuple[int, int, int]:
 
 COUNTED_COLOR = _hex_to_bgr("#2EFFD5")
 UNCOUNTED_COLOR = _hex_to_bgr("#0F1667")
-DEFAULT_CENTER_COLOR = (0, 255, 255)  # Amarillo.
+DEFAULT_CENTER_COLOR = (255, 255, 255)  # Blanco fijo.
 
 ZONE_COLORS = [
     _hex_to_bgr("#0DC9F8"),
@@ -162,8 +162,7 @@ class Visualizer:
 
         # ── Centro ────────────────────────────────────────
         if self.cfg.draw_center:
-            center_color = self.cfg.center_color or DEFAULT_CENTER_COLOR
-            cv2.circle(frame, (cx, cy), self.cfg.center_radius, center_color, -1)
+            cv2.circle(frame, (cx, cy), self.cfg.center_radius, DEFAULT_CENTER_COLOR, -1)
 
         # ── Label con template ───────────────────────────
         if self.cfg.draw_class_label:
@@ -199,7 +198,7 @@ class Visualizer:
                 else:
                     pos = (x2 + off, y1)
 
-            self._draw_label(frame, label_text, pos, class_color)
+            self._draw_label(frame, label_text, pos, (255, 255, 255))
 
         # ── Trayectoria ──────────────────────────────────
         if self.cfg.draw_trajectory and trajectory is not None and len(trajectory) > 0:
