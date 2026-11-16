@@ -42,7 +42,7 @@ class YOLODetectorAdapter:
             device=self._device_str,
             classes=self._allowed_ids,
             verbose=False,
-            half=self._half,
+            quantize=16 if self._half else None,
         )
         return self._parse_results(results)
 
@@ -52,7 +52,7 @@ class YOLODetectorAdapter:
             device=self._device_str,
             classes=self._allowed_ids,
             verbose=False,
-            half=self._half,
+            quantize=16 if self._half else None,
         )
         return [self._parse_results([r]) for r in results]
 

@@ -8,11 +8,13 @@ import sys
 from pathlib import Path
 
 
-def export_model(model_path: str, half: bool = False, batch: int = 1) -> str:
+def export_model(model_path: str, fp16: bool = False, batch: int = 1) -> str:
     from ultralytics import RTDETR
 
     model = RTDETR(model_path)
-    out = model.export(format="engine", half=half, imgsz=640, batch=batch)
+    out = model.export(
+        format="engine", quantize=16 if fp16 else None, imgsz=640, batch=batch
+    )
     dest = Path(out)
     stem = dest.stem
     suffix_b = f"-b{batch}"
@@ -49,7 +51,7 @@ def main():
         print(f"Error: no se encuentra el modelo {args.model}")
         sys.exit(1)
 
-    export_model(args.model, half=args.half, batch=args.batch)
+    export_model(args.model, fp16=args.half, batch=args.batch)
 
 
 if __name__ == "__main__":

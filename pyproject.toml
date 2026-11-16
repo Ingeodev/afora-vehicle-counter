@@ -39,13 +39,13 @@ dependencies = [
 # === Backends de IA (sin torch) ===
 # torch se instala por separado via variante CUDA (torch-cuXXX / torch-cpu)
 yolo = [
-    "ultralytics>=8.0.0",
+    "ultralytics>=8.4.80",
 ]
 dfine = [
     "transformers>=4.30.0",
 ]
 rtdetr = [
-    "ultralytics>=8.0.0",
+    "ultralytics>=8.4.80",
 ]
 tracking = [
     "lapx>=0.5.0",
