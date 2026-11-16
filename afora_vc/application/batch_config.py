@@ -100,6 +100,7 @@ class BatchConfig:
 
     overrides: list[VideoOverride] = field(default_factory=list)
     count: CountConfig | None = None
+    _output_viz: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @classmethod
     def from_yaml(cls, path: str) -> BatchConfig:
@@ -127,6 +128,15 @@ class BatchConfig:
                 f"El YAML debe ser un mapa de campos, no {type(data).__name__}"
             )
         data = dict(data)
+
+        # Si output es un dict (con visualization adentro), extraer output_folder.
+        if isinstance(data.get("output"), dict):
+            out_dict = data.pop("output")
+            data["output"] = out_dict.get("output_folder", "./output")
+            # Guardar la config de visualizacion para pasarla al pipeline.
+            if "visualization" in out_dict:
+                data["_output_viz"] = out_dict["visualization"]
+
         ov_data = data.pop("overrides", [])
         overrides = []
         for item in ov_data:
@@ -141,7 +151,7 @@ class BatchConfig:
         if count_data is not None:
             count_config = cls._parse_count(count_data)
 
-        _check_unknown_keys(data, cls, "el YAML")
+        _check_unknown_keys(data, cls, "el YAML", skip={"_output_viz"})
         return cls(overrides=overrides, count=count_config, **data)
 
     @staticmethod

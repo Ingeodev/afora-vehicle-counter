@@ -118,6 +118,7 @@ def process_video(
     codec: str = "avc1",
     crf: int = 30,
     preset: str = "veryfast",
+    visualization: dict[str, Any] | None = None,
 ) -> ProcessingResult:
     import os
 
@@ -158,6 +159,11 @@ def process_video(
     config.output.save_video = not no_video
     config.output.verbose = not quiet
     config.output.output_folder = output
+
+    # Visualization config from YAML.
+    if visualization:
+        from .config import VisualizationConfig
+        config.output.visualization = VisualizationConfig(**visualization)
 
     # Batch
     config.batch.enabled = batch_size > 1
@@ -371,7 +377,7 @@ def process_directory(
                     "tracker_backend", "batch_size", "tracker_config",
                     "output_name", "pipeline_mode", "queue_maxsize",
                     "profile", "profile_path", "audit",
-                    "codec", "crf", "preset",
+                    "codec", "crf", "preset", "visualization",
                 ]},
             )
             results.append(result)
@@ -530,6 +536,7 @@ def process_from_config(
         profile=config.profile,
         profile_path=config.profile_path,
         audit=config.audit,
+        visualization=config._output_viz or None,
     )
 
 
