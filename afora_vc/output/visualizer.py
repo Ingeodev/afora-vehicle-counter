@@ -41,12 +41,12 @@ ZONE_COLORS = [
 ]
 
 DEFAULT_CLASS_COLORS: dict[str, tuple[int, int, int]] = {
-    "car": (0, 165, 255),       # Naranja
-    "truck": (0, 100, 255),     # Naranja oscuro
-    "bus": (0, 255, 255),       # Amarillo
-    "motorcycle": (255, 0, 0),  # Azul
-    "bicycle": (0, 255, 0),     # Verde
-    "person": (255, 255, 255),  # Blanco
+    "car": _hex_to_bgr("#FF1E8C"),         # Rosa fuerte
+    "truck": _hex_to_bgr("#FF8F3E"),       # Naranja intenso
+    "bus": _hex_to_bgr("#FFE600"),         # Amarillo
+    "motorcycle": _hex_to_bgr("#00D8FF"),  # Cian
+    "bicycle": _hex_to_bgr("#B14DFF"),     # Violeta claro
+    "person": _hex_to_bgr("#FF3B30"),      # Rojo
 }
 
 
