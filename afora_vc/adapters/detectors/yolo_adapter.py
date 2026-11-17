@@ -29,6 +29,7 @@ class YOLODetectorAdapter:
             raise BackendNotInstalledError("yolo", "afora-vehicle-counter[yolo]")
 
         self._model = YOLO(model_path)
+        self._is_engine = str(model_path).endswith(".engine")
         self._classes = vehicle_classes or resolve_vehicle_classes(
             getattr(self._model, "names", None)
         )
@@ -42,7 +43,7 @@ class YOLODetectorAdapter:
             device=self._device_str,
             classes=self._allowed_ids,
             verbose=False,
-            quantize=16 if self._half else None,
+            quantize=None if getattr(self, "_is_engine", False) else (16 if self._half else None),
         )
         return self._parse_results(results)
 
@@ -52,7 +53,7 @@ class YOLODetectorAdapter:
             device=self._device_str,
             classes=self._allowed_ids,
             verbose=False,
-            quantize=16 if self._half else None,
+            quantize=None if getattr(self, "_is_engine", False) else (16 if self._half else None),
         )
         return [self._parse_results([r]) for r in results]
 
