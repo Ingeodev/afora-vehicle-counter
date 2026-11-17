@@ -103,39 +103,17 @@ class Visualizer:
         zones_visited: list[str] | None = None,
         trajectory: np.ndarray | None = None,
     ) -> np.ndarray:
-        bbox = detection.bbox
         counted = bool(zones_visited)
         color = self._get_color(counted)
-        num_zones = len(zones_visited) if zones_visited else 0
-        alpha = self._get_alpha(num_zones)
-
-        x1, y1, x2, y2 = bbox.x1, bbox.y1, bbox.x2, bbox.y2
-
-        sub_frame = frame[max(y1, 0):y2, max(x1, 0):x2]
-        if sub_frame.size > 0:
-            sub_overlay = sub_frame.copy()
-            cv2.rectangle(sub_overlay, (0, 0), (sub_frame.shape[1], sub_frame.shape[0]), color, cv2.FILLED)
-            blended = cv2.addWeighted(sub_overlay, alpha * 0.35, sub_frame, 1 - alpha * 0.35, 0)
-            sub_frame[:] = blended
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, self.line_thickness)
 
         cx, cy = detection.center
         cv2.circle(frame, (cx, cy), 5, (0, 255, 255), -1)
 
-        label = f"{detection.class_name}-{detection.track_id}"
+        # Label estático pequeño arriba del punto central.
+        label = detection.class_name
         cv2.putText(
-            frame, label, (x1, y1 - 5), self.font, self.font_scale, color, 3
+            frame, label, (cx, cy - 10), self.font, 0.4, (255, 255, 255), 1
         )
-
-        if zones_visited:
-            zones_text = ",".join(zones_visited)
-            text_size = cv2.getTextSize(zones_text, self.font, self.font_scale * 2, 2)[0]
-            text_x = (x1 + x2 - text_size[0]) // 2
-            text_y = y1 + text_size[1] + 4
-            cv2.putText(
-                frame, zones_text, (text_x, text_y),
-                self.font, self.font_scale * 2, color, 3,
-            )
 
         if trajectory is not None and len(trajectory) > 0:
             traj_color = self._get_class_color(detection.class_name)
