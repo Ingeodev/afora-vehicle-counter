@@ -493,7 +493,10 @@ def process_from_config(
     skip_paths: set[str] = set()
     if resume and config_path:
         config_dir = os.path.dirname(os.path.abspath(config_path))
-        progress_path = os.path.join(config_dir, "progress.csv")
+        if config.progress_file:
+            progress_path = config.progress_file if os.path.isabs(config.progress_file) else os.path.join(config_dir, config.progress_file)
+        else:
+            progress_path = os.path.join(config_dir, "progress.csv")
         progress_tracker = ProgressTracker(progress_path)
         skip_paths = progress_tracker.completed_paths
 

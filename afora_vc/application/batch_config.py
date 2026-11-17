@@ -100,6 +100,7 @@ class BatchConfig:
 
     overrides: list[VideoOverride] = field(default_factory=list)
     count: CountConfig | None = None
+    progress_file: str | None = None  # Ruta al archivo de progreso (default: progress.csv junto al config).
     _output_viz: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @classmethod
