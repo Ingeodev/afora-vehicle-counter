@@ -246,6 +246,12 @@ audit: true
 | `crf` | `int` | `30` | Calidad 0-51 (más alto = más chico) |
 | `preset` | `str` | `veryfast` | Preset x264: `ultrafast`, `veryfast`, `medium`, ... |
 
+**Reanudacion**
+
+| Campo | Tipo | Default | Descripción |
+|---|---|---|---|
+| `progress_file` | `str` | `null` | Ruta al archivo de progreso. Relativa al config o absoluta. Si es `null`, usa `progress.csv` junto al YAML. |
+
 **Fechas y profiling**
 
 | Campo | Tipo | Default | Descripción |
@@ -257,6 +263,74 @@ audit: true
 | `audit` | `bool` | `false` | Auditar detecciones por etapa |
 | `overrides` | `list` | `[]` | Ajustes por video (ver más abajo) |
 | `count` | `dict` | `null` | Conteo agregado (ver "Conteo y gráficos") |
+
+**Visualizacion**
+
+La seccion `output` puede ser un string simple o un dict con `output_folder` y `visualization`:
+
+```yaml
+# Forma simple (comportamiento original):
+output: C:\output\cam3
+
+# Forma extendida (con control granular del video de salida):
+output:
+  output_folder: C:\output\cam3
+  visualization:
+    draw_bbox: false
+    draw_center: true
+    draw_trajectory: true
+    draw_class_label: true
+    draw_zones: true
+    draw_zone_labels: true
+    draw_stats: false
+    trajectory_thickness: 6
+    trajectory_max_points: 30
+    trajectory_class_colors: true
+    label_template: "$id-$zones\n$class"
+    label_reference: center        # bbox o center
+    label_anchor: above            # above, below, left, right
+    label_offset: 10               # pixeles de separacion
+    label_font_size: m             # xs, s, m, l
+    label_thickness: 4
+    label_bg_alpha: 0.5
+    zone_render_mode: both         # fill, outline, both
+    zone_alpha: 0.3
+```
+
+**Templates de label**
+
+Las variables disponibles en `label_template` son:
+
+| Variable | Descripción |
+|---|---|
+| `$id` | ID del track |
+| `$class` | Nombre de la clase |
+| `$zones` | Zonas donde entro el vehiculo (separadas por coma) |
+
+Ejemplo: `"$id-$zones\n$class"` → `"42-ZA,ZB\ncar"`
+
+**Colores por clase**
+
+Los colores de trayectoria y labels se definen por clase. Los defaults son:
+
+| Clase | Color | Hex |
+|---|---|---|
+| `car` | Rosa fuerte | `#FF1E8C` |
+| `truck` | Naranja intenso | `#FF8F3E` |
+| `bus` | Amarillo | `#FFE600` |
+| `motorcycle` | Cian | `#00D8FF` |
+| `bicycle` | Violeta claro | `#B14DFF` |
+| `person` | Rojo | `#FF3B30` |
+
+Para overridear en el YAML, usar `class_colors` dentro de `visualization`:
+
+```yaml
+output:
+  visualization:
+    class_colors:
+      car: [0, 100, 255]      # BGR
+      truck: [0, 165, 255]
+```
 
 #### Video de salida
 
@@ -322,6 +396,13 @@ El comando `run` crea/lee `progress.csv` en la misma carpeta del YAML. Cada vide
 ```
 input_path,output_path,processing_time_minutes,total_detections
 C:\Videos\roosvelt\video1.mp4,C:\output\roosvelt,26.59,8269
+```
+
+**Ruta personalizada:** para evitar colisiones cuando multiples sesiones comparten el mismo config, usar `progress_file`:
+
+```yaml
+progress_file: sesion_1_progress.csv          # relativa al config
+progress_file: /content/posproceso/S1/progress.csv  # absoluta
 ```
 
 Si todos los videos ya estaban procesados, `run` termina con exit code `0` sin
@@ -579,14 +660,23 @@ Crear `config.yaml` en el directorio de trabajo:
 
 ```yaml
 input: C:\Videos\cam3
-output: C:\output\cam3
-recursive: true
+output:
+  output_folder: C:\output\cam3
+  visualization:
+    draw_zones: true
+    draw_class_label: true
+    trajectory_thickness: 6
+    label_font_size: m
+    label_reference: center
 
 backend: rtdetr
 model: models/rtdetr-l.pt
 pipeline_mode: pipelined
 reduce: 2
 batch_size: 12
+
+# Para multiples sesiones con el mismo config:
+# progress_file: sesion_1_progress.csv
 
 count:
   interval: 15
@@ -638,7 +728,7 @@ C:\output\cam3\
 │   ├── detections.csv
 │   ├── aggregated_counts.csv
 │   └── aggregated_chart.html
-└── progress.csv                          # control de reanudación
+└── progress.csv                          # control de reanudación (junto al YAML, o ruta custom)
 ```
 
 ### 5. Ver resultados
