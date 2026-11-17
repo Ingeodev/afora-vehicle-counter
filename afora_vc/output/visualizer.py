@@ -38,6 +38,15 @@ ZONE_COLORS = [
     _hex_to_bgr("#7839C0"),
 ]
 
+DEFAULT_CLASS_COLORS: dict[str, tuple[int, int, int]] = {
+    "car": _hex_to_bgr("#FF1E8C"),         # Rosa fuerte
+    "truck": _hex_to_bgr("#FF8F3E"),       # Naranja intenso
+    "bus": _hex_to_bgr("#FFE600"),         # Amarillo
+    "motorcycle": _hex_to_bgr("#00D8FF"),  # Cian
+    "bicycle": _hex_to_bgr("#B14DFF"),     # Violeta claro
+    "person": _hex_to_bgr("#FF3B30"),      # Rojo
+}
+
 
 class Visualizer:
     def __init__(
@@ -53,9 +62,11 @@ class Visualizer:
         self.font_scale = font_scale
         self.font = cv2.FONT_HERSHEY_SIMPLEX
 
-    @staticmethod
-    def _get_color(counted: bool) -> tuple[int, int, int]:
+    def _get_color(self, counted: bool) -> tuple[int, int, int]:
         return COUNTED_COLOR if counted else UNCOUNTED_COLOR
+
+    def _get_class_color(self, class_name: str) -> tuple[int, int, int]:
+        return DEFAULT_CLASS_COLORS.get(class_name, (255, 255, 255))
 
     @staticmethod
     def _get_alpha(num_zones: int) -> float:
@@ -127,7 +138,8 @@ class Visualizer:
             )
 
         if trajectory is not None and len(trajectory) > 0:
-            cv2.polylines(frame, [trajectory], False, self.trajectory_color, self.line_thickness)
+            traj_color = self._get_class_color(detection.class_name)
+            cv2.polylines(frame, [trajectory], False, traj_color, self.line_thickness)
 
         return frame
 
