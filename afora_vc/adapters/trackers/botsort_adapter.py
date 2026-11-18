@@ -86,7 +86,10 @@ class BotSORTTrackerAdapter:
             "track_buffer": 30,
             "match_thresh": 0.8,
             "fuse_score": True,
-            "gmc_method": "sparseOptFlow",
+            # Camaras fijas: GMC (flujo optico sobre el frame completo) es el
+            # mayor costo del pipeline y no aporta nada sin movimiento de
+            # camara. Un YAML de --tracker-config puede reactivarlo.
+            "gmc_method": "none",
             "proximity_thresh": 0.5,
             "appearance_thresh": 0.8,
             "with_reid": False,
