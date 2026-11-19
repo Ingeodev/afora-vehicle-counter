@@ -6,8 +6,17 @@ from typing import Any, Literal
 
 import yaml
 
-from ..domain.counting.entities import CountConfig, CountGroupConfig
+from ..domain.counting.entities import (
+    ZONE_SEPARATOR,
+    WILDCARD_MANY,
+    WILDCARD_ONE,
+    CountConfig,
+    CountGroupConfig,
+)
 from ..domain.exceptions import ConfigurationError
+
+_VALID_COUNT_KEYS = {"interval", "graph", "groups"}
+_VALID_GROUP_KEYS = {"name", "access", "include", "exclude", "zones"}
 
 
 def _check_unknown_keys(
@@ -27,6 +36,54 @@ def _check_unknown_keys(
             f"Campo(s) desconocido(s) en {origin}: {', '.join(unknown)}. "
             f"Validos: {', '.join(sorted(valid))}"
         )
+
+
+def _parse_zone_pattern(group_name: str, raw_pattern: Any) -> list[str]:
+    """Valida un patron de zonas y lo normaliza a una lista de strings.
+
+    `_` matchea una zona y `+` una o mas; el resto son zonas literales.
+    """
+    if not isinstance(raw_pattern, list) or not raw_pattern:
+        raise ConfigurationError(
+            f"El grupo '{group_name}' tiene un patron de zonas vacio o invalido: "
+            f"{raw_pattern!r}"
+        )
+
+    pattern: list[str] = []
+    for raw_zone in raw_pattern:
+        zone = str(raw_zone).strip()
+        if not zone:
+            raise ConfigurationError(
+                f"El grupo '{group_name}' tiene una zona vacia en {raw_pattern!r}"
+            )
+        if zone in {"*", "%"}:
+            raise ConfigurationError(
+                f"El grupo '{group_name}' usa '{zone}' en {raw_pattern!r}. "
+                f"Usa '{WILDCARD_ONE}' para exactamente una zona y "
+                f"'{WILDCARD_MANY}' para una o mas ('*' y '%' no son "
+                f"validos en YAML sin comillas)"
+            )
+        if ZONE_SEPARATOR in zone:
+            raise ConfigurationError(
+                f"La zona '{zone}' del grupo '{group_name}' no puede contener "
+                f"'{ZONE_SEPARATOR}'"
+            )
+        pattern.append(zone)
+
+    if not any(z not in (WILDCARD_ONE, WILDCARD_MANY) for z in pattern):
+        raise ConfigurationError(
+            f"El patron {pattern} del grupo '{group_name}' no tiene zonas "
+            f"literales: matchearia cualquier trayectoria"
+        )
+
+    for current, following in zip(pattern, pattern[1:]):
+        if current == WILDCARD_MANY and following == WILDCARD_MANY:
+            raise ConfigurationError(
+                f"El patron {pattern} del grupo '{group_name}' repite "
+                f"'{WILDCARD_MANY}': con uno solo alcanza"
+            )
+
+    return pattern
 
 
 @dataclass
@@ -157,10 +214,50 @@ class BatchConfig:
 
     @staticmethod
     def _parse_count(data: dict[str, Any]) -> CountConfig:
+        unknown = sorted(set(data) - _VALID_COUNT_KEYS)
+        if unknown:
+            raise ConfigurationError(
+                f"Campo(s) desconocido(s) en 'count': {', '.join(unknown)}. "
+                f"Validos: {', '.join(sorted(_VALID_COUNT_KEYS))}"
+            )
+
         interval = int(data.get("interval", 15))
         raw_groups = data.get("groups", [])
         groups = []
+        seen_patterns: dict[tuple[str, ...], str] = {}
+
         for g in raw_groups:
+            if not isinstance(g, dict):
+                raise ConfigurationError(
+                    f"Cada grupo de 'count.groups' debe ser un mapa, no {type(g).__name__}"
+                )
+            name = str(g.get("name", ""))
+            unknown = sorted(set(g) - _VALID_GROUP_KEYS)
+            if unknown:
+                raise ConfigurationError(
+                    f"Campo(s) desconocido(s) en el grupo '{name}': {', '.join(unknown)}. "
+                    f"Validos: {', '.join(sorted(_VALID_GROUP_KEYS))}"
+                )
+
+            raw_zones = g.get("zones", [])
+            if not isinstance(raw_zones, list) or not raw_zones:
+                raise ConfigurationError(
+                    f"El grupo '{name}' no tiene 'zones' definidas"
+                )
+
+            zone_paths: list[list[str]] = []
+            for raw_pattern in raw_zones:
+                pattern = _parse_zone_pattern(name, raw_pattern)
+                key = tuple(pattern)
+                if key in seen_patterns:
+                    raise ConfigurationError(
+                        f"El patron {pattern} esta repetido en los grupos "
+                        f"'{seen_patterns[key]}' y '{name}'. Cada trayectoria "
+                        f"debe matchear con un solo flujo"
+                    )
+                seen_patterns[key] = name
+                zone_paths.append(pattern)
+
             include: dict[int, str] | Literal["all"] = g.get("include", "all")
             exclude: dict[int, str] | Literal["none"] = g.get("exclude", "none")
             if isinstance(include, dict):
@@ -168,11 +265,11 @@ class BatchConfig:
             if isinstance(exclude, dict):
                 exclude = {int(k): str(v) for k, v in exclude.items()}
             groups.append(CountGroupConfig(
-                name=str(g.get("name", "")),
+                name=name,
                 include=include,
                 exclude=exclude,
                 access=str(g.get("access", "")),
-                zone_paths=[[str(z) for z in zp] for zp in g.get("zones", [])],
+                zone_paths=zone_paths,
             ))
         graph = str(data.get("graph", "web")).lower()
         return CountConfig(interval_minutes=interval, groups=groups, graph=graph)

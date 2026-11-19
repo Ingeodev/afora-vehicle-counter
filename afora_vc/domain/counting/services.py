@@ -4,6 +4,7 @@ import csv
 import os
 import re
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
@@ -13,6 +14,7 @@ from .entities import (
     CountGroupConfig,
     CountConfig,
     MatchedFlow,
+    ZonePattern,
 )
 
 # Patron para extraer timestamp del nombre del video:
@@ -220,50 +222,82 @@ class VehiclePathBuilder:
 # FlowMatcher
 # ---------------------------------------------------------------------------
 
+@dataclass(frozen=True)
+class _FlowRule:
+    """Grupo de conteo con los tipos de vehiculo ya resueltos."""
+
+    name: str
+    include: frozenset[str]
+    exclude: frozenset[str]
+
+
 class FlowMatcher:
-    """Empareja VehiclePath con los flujos definidos en count.groups[]."""
+    """Empareja VehiclePath con los flujos definidos en count.groups[].
+
+    El match es completo: el patron debe cubrir toda la trayectoria. Cuando
+    varios patrones matchean, gana el mas especifico (ver
+    ``ZonePattern.precedence_key``); el orden del YAML solo desempata.
+    """
 
     def __init__(
         self,
         groups: list[CountGroupConfig],
         resolver: VehicleClassesResolver,
     ):
-        self._groups = groups
-        self._resolver = resolver
+        self._rules: list[_FlowRule] = []
+        patterns: list[tuple[tuple[int, int, int, int, int], int, ZonePattern]] = []
+
+        for group_index, g in enumerate(groups):
+            self._rules.append(_FlowRule(
+                name=g.name,
+                include=frozenset(resolver.resolve_group_include(g.include)),
+                exclude=frozenset(resolver.resolve_group_exclude(g.exclude)),
+            ))
+            for pattern_index, zone_path in enumerate(g.zone_paths):
+                pattern = ZonePattern.compile(zone_path)
+                patterns.append((
+                    pattern.precedence_key(group_index, pattern_index),
+                    group_index,
+                    pattern,
+                ))
+
+        patterns.sort(key=lambda item: item[0])
+        self._patterns = patterns
+        self._hits = [0] * len(patterns)
 
     def process(self, paths: list[VehiclePath]) -> list[VehiclePath]:
         for path in paths:
-            path.flow_name = self._match(path)
+            flow_name, pattern = self._match(path)
+            path.flow_name = flow_name
+            path.flow_pattern = str(pattern) if pattern is not None else None
         return paths
 
-    def _match(self, path: VehiclePath) -> str | None:
-        for g in self._groups:
-            if not self._type_matches(path.vehicle_type, g):
+    def _match(self, path: VehiclePath) -> tuple[str | None, ZonePattern | None]:
+        if not path.zones:
+            return None, None
+        for index, (_, group_index, pattern) in enumerate(self._patterns):
+            rule = self._rules[group_index]
+            if not self._type_matches(path.vehicle_type, rule):
                 continue
-            if self._path_matches(path.zones, g.zone_paths):
-                return g.name
-        return None
+            if pattern.matches(path.zones):
+                self._hits[index] += 1
+                return rule.name, pattern
+        return None, None
 
-    def _type_matches(self, vt: str, g: CountGroupConfig) -> bool:
-        included = self._resolver.resolve_group_include(g.include)
-        excluded = self._resolver.resolve_group_exclude(g.exclude)
-        if vt in excluded:
+    def _type_matches(self, vt: str, rule: _FlowRule) -> bool:
+        if vt in rule.exclude:
             return False
-        if included:
-            return vt in included
+        if rule.include:
+            return vt in rule.include
         return True
 
-    @staticmethod
-    def _path_matches(zones: list[str], zone_paths: list[list[str]]) -> bool:
-        for zp in zone_paths:
-            if FlowMatcher._is_subsequence(zones, zp):
-                return True
-        return False
-
-    @staticmethod
-    def _is_subsequence(seq: list[str], sub: list[str]) -> bool:
-        it = iter(seq)
-        return all(elem in it for elem in sub)
+    def dead_patterns(self) -> list[tuple[str, str]]:
+        """Patrones que no matchearon ninguna trayectoria (config muerta)."""
+        return [
+            (self._rules[group_index].name, str(pattern))
+            for index, (_, group_index, pattern) in enumerate(self._patterns)
+            if self._hits[index] == 0
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -271,8 +305,10 @@ class FlowMatcher:
 # ---------------------------------------------------------------------------
 
 class InterventionFileExporter:
-    """Crea detections.csv con todos los VehiclePath
-    y retorna los MatchedFlow para el siguiente paso."""
+    """Crea detections.csv con todos los VehiclePath, escribe el reporte de
+    trayectorias sin match y retorna los MatchedFlow para el siguiente paso."""
+
+    UNMATCHED_FILENAME = "unmatched_paths.csv"
 
     def process(
         self,
@@ -291,6 +327,7 @@ class InterventionFileExporter:
                 "hora_inicial": p.first_seen_str,
                 "hora_final": p.last_seen_str,
                 "path_asignado": flow_str,
+                "patron": p.flow_pattern or "",
             })
             if p.flow_name is not None:
                 matched.append(self._to_matched_flow(p))
@@ -300,12 +337,66 @@ class InterventionFileExporter:
         with open(out_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=[
                 "vehicle_id", "vehicle_type", "zones",
-                "hora_inicial", "hora_final", "path_asignado",
+                "hora_inicial", "hora_final", "path_asignado", "patron",
             ])
             writer.writeheader()
             writer.writerows(rows)
 
+        self._write_unmatched(paths, output_dir)
         return matched
+
+    def _write_unmatched(
+        self,
+        paths: list[VehiclePath],
+        output_dir: str,
+    ) -> None:
+        """Agrupa las trayectorias UNKNOWN para poder ajustar los patrones."""
+        out_path = os.path.join(output_dir, self.UNMATCHED_FILENAME)
+        stats: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
+
+        for p in paths:
+            if p.flow_name is not None:
+                continue
+            key = (tuple(p.zones), p.vehicle_type)
+            item = stats.get(key)
+            if item is None:
+                stats[key] = {
+                    "count": 1,
+                    "hora_min": p.first_seen_str,
+                    "hora_max": p.last_seen_str,
+                }
+                continue
+            item["count"] += 1
+            if p.first_seen_str < item["hora_min"]:
+                item["hora_min"] = p.first_seen_str
+            if p.last_seen_str > item["hora_max"]:
+                item["hora_max"] = p.last_seen_str
+
+        if not stats:
+            # Evitar dejar un reporte viejo de una corrida anterior.
+            if os.path.exists(out_path):
+                os.remove(out_path)
+            return
+
+        rows = [
+            {
+                "zones": "[" + ", ".join(zones) + "]",
+                "vehicle_type": vehicle_type,
+                "count": item["count"],
+                "hora_min": item["hora_min"],
+                "hora_max": item["hora_max"],
+            }
+            for (zones, vehicle_type), item in stats.items()
+        ]
+        rows.sort(key=lambda r: (-r["count"], r["zones"], r["vehicle_type"]))
+
+        os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+        with open(out_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                "zones", "vehicle_type", "count", "hora_min", "hora_max",
+            ])
+            writer.writeheader()
+            writer.writerows(rows)
 
     @staticmethod
     def _to_matched_flow(p: VehiclePath) -> MatchedFlow:

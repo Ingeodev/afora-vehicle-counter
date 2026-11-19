@@ -6,7 +6,7 @@ from .. import __version__
 from ..application.facade import process_video, process_directory, process_from_config, check_config
 from ..application.batch_config import BatchConfig
 from ..domain.exceptions import AforosError
-from ..domain.counting.services import VehicleClassesResolver
+from ..domain.counting.services import InterventionFileExporter, VehicleClassesResolver
 from ..application.count_pipeline import GroupPipeline, export_chart
 from ..output.count_exporter import DefaultFlowExporter
 from ..utilities.video_sorter import sort_videos_by_date, rollback_sort
@@ -304,8 +304,18 @@ def _cmd_group(args):
 
     if not getattr(args, "quiet", False):
         print(f"CSV: {out_path}")
+        unmatched_path = os.path.join(
+            out_dir, InterventionFileExporter.UNMATCHED_FILENAME
+        )
+        if os.path.exists(unmatched_path):
+            print(f"Sin match: {unmatched_path}")
         if chart_path:
             print(f"Grafico: {chart_path}")
+        dead = pipeline.flow_matcher.dead_patterns()
+        if dead:
+            print("Patrones sin coincidencias:")
+            for flow_name, pattern in dead:
+                print(f"  {flow_name} {pattern}")
     return 0
 
 

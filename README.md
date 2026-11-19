@@ -280,40 +280,310 @@ OpenCV e ignora `crf` y `preset` (además de pesar mucho más).
 
 #### Conteo y gráficos
 
-La sección `count:` habilita el pipeline de conteo agregado por subdirectorio. Al terminar de procesar todos los videos de una carpeta, genera automáticamente un CSV agregado y un gráfico.
+La sección `count:` habilita el pipeline de conteo agregado por subdirectorio. `afora run` lo ejecuta automáticamente al terminar cada carpeta de fecha; `afora group` lo corre solo sobre detecciones ya existentes (ver [Agrupar detecciones](#agrupar-detecciones-post-procesamiento)).
 
 ```yaml
 count:
   interval: 15           # minutos por intervalo
   graph: web             # none | image | web
   groups:
-    - name: Flujo Norte
+    - name: "1"
       access: norte
       include: all
-      exclude: none
+      exclude: person
       zones:
-        - [d, l, a]
-        - [l, a]
-    - name: Flujo Sur
+        - [A]
+        - [A, F]
+
+    - name: "8"
       access: sur
-      include: all
-      exclude: none
+      include: [car, motorcycle, bus, truck, bicycle]
+      exclude: person
       zones:
-        - [c, d]
+        - [C, B, A, F]
+        - [+, B, A, F]
 ```
 
-Los flujos se definen con:
-- **`name`** — nombre del flujo (aparece en CSV y gráfico)
-- **`access`** — acceso: `norte`, `sur`, `este`, `oeste`
-- **`include`** / **`exclude`** — tipos de vehículo: `all`, `none`, o mapa `{class_id: nombre}`
-- **`zones`** — secuencias de zonas que definen el flujo (subsequence matching)
-- **`graph`** — tipo de gráfico: `none` (solo CSV), `image` (PNG con Plotly), `web` (HTML con Chart.js vía CDN)
+| Campo | Tipo | Default | Descripción |
+|---|---|---|---|
+| `interval` | `int` | `15` | Minutos por intervalo de agregación. Entero positivo (usá divisores de 60 para etiquetas limpias). |
+| `graph` | `str` | `web` | `none`, `image` o `web`. |
+| `groups` | `list` | `[]` | Flujos a contar. Cada elemento es un grupo. |
+
+Cualquier otra clave dentro de `count:` es un error de configuración, no se ignora en silencio.
 
 El flag `--graph` del CLI sobreescribe el valor del YAML:
 
 ```bash
 afora run config.yaml --graph image
 ```
+
+##### Grupos
+
+| Campo | Tipo | Default | Descripción |
+|---|---|---|---|
+| `name` | `str` | `""` | Nombre del flujo: es la etiqueta del CSV y del gráfico. Tiene que ser **único en toda la config**. |
+| `access` | `str` | `""` | Acceso: `norte`, `sur`, `oeste` o `este`. |
+| `include` | `str` / `list` / `map` | `all` | Tipos de vehículo que entran al flujo. |
+| `exclude` | `str` / `list` / `map` | `none` | Tipos de vehículo que quedan afuera. |
+| `zones` | `list[list[str]]` | — | Patrones de trayectoria. Requerido y no vacío. |
+
+**`access` no es texto libre.** Tiene que ser exactamente uno de `norte`, `sur`, `oeste`, `este`, en minúsculas. Si escribís otra cosa (`Norte`, `norte `, `N`) o lo omitís, el flujo se cuenta internamente pero **no aparece** en `aggregated_counts.csv`: el exportador recorre los accesos en el orden fijo `norte → sur → oeste → este` y descarta lo que no está en esa lista. El gráfico sí lo muestra (itera los grupos del YAML), así que el CSV y el gráfico quedan inconsistentes. No hay warning.
+
+**`name` también tiene que ser único** (no solo dentro de un acceso). El `access` de cada trayectoria se resuelve por nombre de flujo, así que con dos grupos homónimos todas las trayectorias se asignan al **último acceso declarado** y en el CSV quedan columnas duplicadas: unas con el conteo y otras en cero.
+
+**`include` / `exclude`** aceptan todas estas formas:
+
+```yaml
+include: all                  # todos los tipos del modelo (default)
+include: person               # un solo tipo
+include: [car, motorcycle]    # una lista
+include:
+  2: car                      # mapa class_id -> nombre (compatibilidad)
+exclude: none                 # ninguno (default)
+exclude: person               # un solo tipo
+exclude: [person, bicycle]
+```
+
+Reglas de resolución:
+
+1. `exclude` gana siempre: si el tipo está en `exclude`, el flujo no lo cuenta aunque esté en `include`.
+2. Los nombres se comparan sin distinguir mayúsculas (`Car` == `car`).
+3. `all` significa todas las clases del modelo. Con `model_config` en el YAML (o `--model-config` en `afora group`) salen de `vehicle_classes`; sin él, de los defaults `person`, `bicycle`, `car`, `motorcycle`, `bus`, `truck`.
+4. Los nombres desconocidos se ignoran. **Ojo:** `include: [van]` contra un modelo que no tiene `van` resuelve a lista vacía, y una lista vacía significa "sin restricción" → el flujo cuenta todo. Verificá los nombres contra tu modelo.
+5. El orden de la lista no importa.
+
+##### Patrones de zonas
+
+Cada elemento de `zones` es un patrón; un grupo puede tener todos los que necesite (se combinan con OR). El patrón es una **lista ordenada de tokens**:
+
+```
+patron := token ("," token)*
+token  := <etiqueta de zona> | "_" | "+"
+```
+
+| Token | Significado | Ejemplo |
+|---|---|---|
+| etiqueta | Una zona concreta, tal cual figura en el JSON de zonas | `A`, `B`, `Norte` |
+| `_` | Exactamente una zona, cualquiera | `[A, _, D]` |
+| `+` | Una o más zonas, cualesquiera | `[A, +]` |
+
+Reglas:
+
+- **El match es completo.** El patrón tiene que cubrir la trayectoria entera, de la primera zona a la última. No es "contiene" ni "subsecuencia": si sobra o falta una zona, no matchea.
+- La trayectoria es la secuencia de **entradas a zonas en orden cronológico**. Si un vehículo vuelve a entrar a la misma zona, la etiqueta se repite (`[A, B, A]`).
+- `_` nunca matchea cero zonas: `[A, _, D]` no matchea `[A, D]`.
+- `+` nunca matchea cero zonas: `[A, +]` no matchea `[A]`. Para aceptar también `[A]` hay que declarar el patrón `[A]` aparte.
+- Los comodines pueden ir en cualquier posición: al inicio (`[+, D]`), al final (`[A, +]`), en el medio (`[A, +, D]`) o combinados (`[A, _, +, D]`).
+- Dos `+` consecutivos no aportan nada y se rechazan (`[A, +, +, D]`); usá uno solo.
+- `_` y `+` son **reservados**: si una zona del JSON se llama `_` o `+`, no se puede usar como literal.
+- Los literales distinguen mayúsculas y se comparan exactos: `A` no matchea la zona `a`.
+- Un patrón de un solo literal es válido: `[A]` matchea únicamente trayectorias de exactamente una zona, `A`.
+- Un patrón sin literales se rechaza (`[_]`, `[_, _]`, `[+, +]`): matchearía casi cualquier trayectoria y volvería inútil al resto de la config.
+- Repetir una etiqueta es válido y significativo: `[A, B, A]` matchea un vehículo que vuelve a `A`.
+
+Para entender los casos límite: la trayectoria se serializa con comas (`A,B,D`), cada patrón se traduce a regex (`_` → `[^,]+`, `+` → `[^,]+(?:,[^,]+)*`, literales escapados) y se compara con `fullmatch`. Por eso los comodines nunca cruzan el separador de zonas.
+
+**Match exacto**
+
+| Patrón | Trayectoria | ¿Match? | Por qué |
+|---|---|---|---|
+| `[A, B, C]` | `[A, B, C]` | ✅ | cubre todo |
+| `[A, B, C]` | `[A, B, C, D]` | ❌ | sobra `D` |
+| `[A, B, C]` | `[A, B]` | ❌ | falta `C` |
+| `[B, C]` | `[A, B, C]` | ❌ | sobra `A` al inicio |
+| `[A, C]` | `[A, B, C]` | ❌ | falta `B` en el medio |
+| `[A, B]` | `[B, A]` | ❌ | el orden importa |
+| `[A, B, A]` | `[A, B, A]` | ✅ | reingreso a `A` |
+
+**Comodín `_` (una zona)**
+
+| Patrón | Trayectoria | ¿Match? | Por qué |
+|---|---|---|---|
+| `[A, _, C]` | `[A, B, C]` | ✅ | `_` = `B` |
+| `[A, _, C]` | `[A, B, D, C]` | ❌ | `_` es una sola zona |
+| `[A, _, C]` | `[A, C]` | ❌ | `_` no matchea cero |
+| `[A, _, C]` | `[A, B, C, D]` | ❌ | sobra `D` |
+| `[A, _, _]` | `[A, B, C]` | ✅ | dos zonas cualesquiera |
+| `[A, _, _]` | `[A, B]` | ❌ | falta una |
+| `[_, B]` | `[A, B]` | ✅ | `_` = `A` |
+| `[_, B]` | `[A, X, B]` | ❌ | `_` es una sola |
+
+**Comodín `+` (una o más)**
+
+| Patrón | Trayectoria | ¿Match? | Por qué |
+|---|---|---|---|
+| `[A, +]` | `[A, B]` | ✅ | `+` = `B` |
+| `[A, +]` | `[A, B, C, D]` | ✅ | `+` = `B, C, D` |
+| `[A, +]` | `[A]` | ❌ | `+` no matchea cero |
+| `[A, +]` | `[B, A]` | ❌ | no arranca en `A` |
+| `[+, D]` | `[A, D]` | ✅ | `+` = `A` |
+| `[+, D]` | `[A, B, C, D]` | ✅ | `+` = `A, B, C` |
+| `[+, D]` | `[D]` | ❌ | `+` no matchea cero |
+| `[+, D]` | `[D, A]` | ❌ | no termina en `D` |
+| `[L, +, D]` | `[L, C, D]` | ✅ | `+` = `C` |
+| `[L, +, D]` | `[L, M, N, D]` | ✅ | `+` = `M, N` |
+| `[L, +, D]` | `[L, D]` | ❌ | `+` no matchea cero |
+| `[+, B, A]` | `[X, Y, B, A]` | ✅ | `+` = `X, Y` |
+| `[+, B, A]` | `[B, A]` | ❌ | falta al menos una antes de `B` |
+| `[A, +, D]` | `[A, B, C, D]` | ✅ | `+` = `B, C` |
+| `[A, +, D]` | `[A, D]` | ❌ | `+` no matchea cero |
+
+**Combinados**
+
+| Patrón | Trayectoria | ¿Match? | Por qué |
+|---|---|---|---|
+| `[A, _, +, D]` | `[A, X, Y, D]` | ✅ | `_` = `X`, `+` = `Y` |
+| `[A, _, +, D]` | `[A, X, Y, Z, D]` | ✅ | `_` = `X`, `+` = `Y, Z` |
+| `[A, _, +, D]` | `[A, X, D]` | ❌ | `+` no matchea cero |
+
+##### Precedencia: quién gana cuando matchean varios
+
+Todos los patrones de todos los grupos se compilan juntos y se ordenan una sola vez. Para cada trayectoria se recorre esa lista y gana el **primer patrón que matchea y cuyo grupo acepta el tipo de vehículo**. Ese orden no es el del YAML: el YAML solo desempata al final.
+
+Criterios, en orden:
+
+1. **Más zonas literales.** Un patrón 100 % definido le gana a uno con comodines.
+2. **Menos `+`.** A igualdad de literales, gana el más acotado.
+3. **Más `_`.** A igualdad de literales y de `+`, más `_` significa un patrón más largo y por lo tanto más restrictivo.
+4. **Orden del YAML**: primero el grupo declarado antes; dentro de un grupo, el patrón declarado antes.
+
+| Patrones que matchean | Trayectoria | Gana | Por qué |
+|---|---|---|---|
+| `[A, B, C, D]` vs `[+, D]` | `[A, B, C, D]` | `[A, B, C, D]` | 4 literales vs 1 |
+| `[A, B, +]` vs `[A, _, _]` | `[A, B, C]` | `[A, B, +]` | 2 literales vs 1 |
+| `[A, B, +]` vs `[A, B, _, _]` | `[A, B, C, D]` | `[A, B, _, _]` | 2 literales, 1 `+` vs 0 |
+| `[A, _, +]` vs `[A, +]` | `[A, B, C]` | `[A, _, +]` | 1 literal, 1 `+`, más `_` |
+| `[_, _]` vs `[A, B]` | `[A, B]` | `[A, B]` | 2 literales vs 0 |
+| `[A, +]` vs `[+, D]` | `[A, B, D]` | el primero del YAML | empate total |
+| `[A, B, +]` vs `[A, +, D]` | `[A, B, C, D]` | el primero del YAML | empate total |
+
+Detalles que importan:
+
+- La comparación es **por patrón**, no por grupo. Los patrones de un grupo compiten contra los de todos los demás.
+- El filtro de tipo se evalúa antes: si el patrón más específico pertenece a un grupo que excluye ese tipo de vehículo, se saltea y gana el siguiente patrón que sí matchea.
+- Un empate real es una config ambigua: el resultado depende de dónde esté declarado cada grupo. Si dos flujos pueden matchear la misma trayectoria, hacelos distinguibles o aceptá explícitamente el orden.
+
+##### Sin match: `UNKNOWN`
+
+Si ningún patrón matchea (o el que matchea pertenece a un grupo que excluye ese tipo), la trayectoria queda sin flujo:
+
+- En `detections.csv` aparece con `path_asignado = UNKNOWN` y la columna `patron` vacía.
+- No entra en `aggregated_counts.csv` ni en el gráfico: solo se cuentan las trayectorias matcheadas.
+- Se agrega a `unmatched_paths.csv` para que puedas ajustar la config.
+
+##### Validaciones al cargar el YAML
+
+Todas se evalúan antes de procesar nada. Si falla una, el CLI imprime el error y sale con código `1`:
+
+| Caso | Ejemplo | Resultado |
+|---|---|---|
+| Clave desconocida en `count:` | `count: {grups: []}` | Error con la lista de claves válidas |
+| Clave desconocida en un grupo | `zones: ...` escrito `zone:` | Error indicando el grupo y las claves válidas |
+| Grupo que no es un mapa | `groups: [flujo]` | Error de tipo |
+| Grupo sin `zones` o con `zones: []` | `{name: "1", access: sur}` | Error |
+| Patrón vacío | `- []` | Error |
+| Zona vacía | `- [A, " ", B]` | Error |
+| Patrón sin literales | `- [_]`, `- [_, _]`, `- [+, _]` | Error: matchearía cualquier trayectoria |
+| Dos `+` consecutivos | `- [A, +, +, B]` | Error |
+| Zona con coma | `- [A,B]` | Error (la coma es el separador interno) |
+| Patrón repetido | `[A, B]` en dos grupos (o dos veces en el mismo) | Error: cada trayectoria debe matchear con un solo flujo |
+| Comodín `*` o `%` | `- [*, B]` | Error que sugiere `_` y `+` |
+
+##### Trampas de YAML
+
+- `_` y `+` se escriben sin comillas: YAML los trata como texto. `*` y `%` **no** sirven como comodines porque sin comillas `*` es un alias y `%` no puede empezar un token.
+- Las etiquetas que YAML interpreta como otro tipo hay que citarlas. `on`, `off`, `yes`, `no`, `true`, `false` se vuelven booleanos; `123` se vuelve número; `~` se vuelve `null`. El código stringifica lo que llegue, así que `[ON, OFF]` termina siendo `["True", "False"]` y no matchea nunca. Escribí `["ON", "OFF"]`.
+- La coma separa elementos de la lista YAML, por eso no puede formar parte de una etiqueta de zona. Si tu zona se llama `A,1`, renombrala en el JSON.
+- Los espacios después de las comas son opcionales (`[A,F]` y `[A, F]` son equivalentes).
+
+##### Archivos que genera
+
+**`detections.csv`** — una fila por trayectoria, matcheada o no:
+
+| Columna | Contenido |
+|---|---|
+| `vehicle_id` | ID compuesto `video_id_tipo` |
+| `vehicle_type` | Tipo de vehículo |
+| `zones` | Trayectoria, con formato `[A, F]` |
+| `hora_inicial` / `hora_final` | Primera y última entrada a una zona (`HH:MM:SS`) |
+| `path_asignado` | Nombre del flujo o `UNKNOWN` |
+| `patron` | Patrón que matcheó, con formato `[A,F]`; vacío si es `UNKNOWN` |
+
+```csv
+vehicle_id,vehicle_type,zones,hora_inicial,hora_final,path_asignado,patron
+26_12-11-2026_17.45.00_10001_car,car,"[A, F]",17:45:00,17:45:02,1,"[A,F]"
+26_12-11-2026_17.45.00_10002_car,car,"[B]",17:45:03,17:45:04,UNKNOWN,
+```
+
+**`unmatched_paths.csv`** — las trayectorias sin flujo, agrupadas por secuencia exacta de zonas y tipo, ordenadas de mayor a menor frecuencia:
+
+| Columna | Contenido |
+|---|---|
+| `zones` | Secuencia de zonas |
+| `vehicle_type` | Tipo de vehículo |
+| `count` | Cantidad de trayectorias con esa secuencia y tipo |
+| `hora_min` / `hora_max` | Primer y último avistamiento del grupo |
+
+```csv
+zones,vehicle_type,count,hora_min,hora_max
+[B],motorcycle,25001,05:59:54,19:59:58
+[A],person,16221,06:00:00,19:58:36
+```
+
+Es el insumo para ajustar los patrones: mirá qué secuencias se repiten y agregá `_`/`+` donde corresponda. Si en una corrida todo matchea, el archivo se borra para no dejar datos viejos.
+
+**`aggregated_counts.csv`** — matriz con **tres filas de encabezado**: acceso, flujo y tipo de vehículo. La primera columna es el intervalo; cada celda es el conteo. El conteo de una trayectoria se asigna al intervalo de su **primera** entrada a una zona.
+
+```csv
+intervalo,norte,,,sur,,
+,Flujo Norte,,,Flujo Sur,,
+,car,truck,bicycle,car,bus,truck
+06:00-06:15,12,3,0,8,1,2
+06:15-06:30,9,1,1,6,0,1
+```
+
+El archivo se escribe con BOM UTF-8 (lo abre bien Excel) e incluye todos los intervalos del día, incluso los que quedan en cero. Los accesos salen en el orden `norte → sur → oeste → este`; dentro de cada acceso, los flujos en el orden del YAML y los tipos según `include` (o en el orden del modelo cuando es `all`).
+
+**`aggregated_chart.html` / `.png`** — un gráfico por grupo, en el orden del YAML, con barras apiladas por tipo de vehículo. `web` genera HTML con Chart.js desde el CDN de jsDelivr (necesita internet para verse); `image` genera PNG con Plotly + Kaleido; `none` no genera gráfico.
+
+##### Diagnóstico de patrones muertos
+
+Al terminar, `afora group` imprime los patrones que nunca ganaron una trayectoria:
+
+```
+Patrones sin coincidencias:
+  92 [E,B,D]
+  31 [F,A,E,B]
+```
+
+Significa que ese patrón no aportó ningún conteo. Las causas habituales:
+
+1. La secuencia no aparece en los datos (la más común).
+2. El `include`/`exclude` del grupo deja afuera a todos los vehículos que recorren esa secuencia.
+3. Otro patrón más específico absorbe todos sus casos.
+
+No es un error de sintaxis: el patrón es válido, simplemente no está aportando. Si esperabas conteos de ese flujo, es la primera pista para revisar la config.
+
+##### Migración desde el match por subsecuencia
+
+Si venías de una config vieja, el matcheo cambió: antes alcanzaba con que el patrón apareciera **en algún lugar** de la trayectoria; ahora tiene que cubrirla entera. Estas son las diferencias que más se notan:
+
+| Antes (subsecuencia) | Ahora (match completo) |
+|---|---|
+| `[A, B]` matcheaba cualquier trayectoria que pasara por `A` y después por `B`, con zonas libres antes, en el medio o después | solo matchea exactamente `[A, B]` |
+| `[A]` matcheaba cualquier trayectoria que tocara `A` | solo matchea trayectorias de una sola zona, `A` |
+| Ganaba el `zone_path` más largo | Gana el más específico: más literales → menos `+` → más `_` → orden del YAML |
+| Casi toda trayectoria entraba en el flujo con el patrón más largo que apareciera como subsecuencia | Solo entra si un patrón cubre la trayectoria completa; si no, queda `UNKNOWN` y se reporta en `unmatched_paths.csv` |
+
+Receta para migrar:
+
+1. Corré `afora group` con la config actual y abrí `unmatched_paths.csv`.
+2. Para las secuencias cortas que sí querés contar (por ejemplo `[B]`), agregá el patrón explícito `[B]`.
+3. Para variantes con prefijo o sufijo variable, usá `+`: `[+, B, A]`, `[B, A, +]`, `[A, +, D]`.
+4. Para una zona intermedia cualquiera, usá `_`: `[A, _, D]`.
+5. Volvé a correr y revisá la lista de patrones muertos y el top de `unmatched_paths.csv`.
+
 
 #### Reanudacion automatica
 
@@ -410,6 +680,12 @@ afora group --folder C:\output\cam1 --config config.yaml
 | `--model-config` | YAML con `vehicle_classes` para resolver tipos |
 | `--output, -o` | Carpeta de salida (por defecto: la misma `--folder`) |
 | `--graph` | Sobreescribe `graph:` del YAML |
+
+**Qué archivos lee.** Solo los `*_detections.csv` que estén **directamente** en `--folder` (no baja a subcarpetas) y cuyo nombre tenga el patrón `..._YYYY-MM-DD_HH.MM.SS_detections.csv` o `..._DD-MM-YYYY_HH.MM.SS_detections.csv`. Los archivos que no cumplen el formato se saltean en silencio, así que si el conteo da cero revisá primero los nombres. Para procesar varias fechas, corré el comando una vez por carpeta o usá `afora run`, que lo hace automáticamente por subdirectorio.
+
+**Qué genera.** `detections.csv` (todas las trayectorias con flujo y patrón), `unmatched_paths.csv` (las que no matchearon, agrupadas por secuencia y tipo con conteo y rango horario), `aggregated_counts.csv` y el gráfico según `graph:`. Al final imprime los patrones que no matchearon nada y los archivos generados. Si el YAML no tiene sección `count:`, sale con código `1` sin procesar.
+
+Ver [Conteo y gráficos](#conteo-y-gráficos) para la sintaxis completa de `count:`, patrones, precedencia y formato de cada archivo.
 
 ### Utilidades
 
@@ -618,7 +894,8 @@ El pipeline:
 1. Escanea `C:\Videos\cam3` recursivamente
 2. Procesa cada video con RT-DETR y BotSORT
 3. Por subdirectorio (cada fecha), al terminar todos los videos:
-   - Genera `detections.csv` con intervenciones (paths asignados)
+   - Genera `detections.csv` con intervenciones (paths asignados + patrón usado)
+   - Genera `unmatched_paths.csv` con las trayectorias que no matchearon ningún flujo
    - Genera `aggregated_counts.csv` con conteo por acceso → flujo → tipo → intervalo
    - Genera `aggregated_chart.html` con gráficos de barras apiladas por flujo (Chart.js)
 
@@ -629,13 +906,15 @@ C:\output\cam3\
 ├── 2026-06-01\
 │   ├── cam3_20260601143000_01.mp4        # video procesado
 │   ├── cam3_20260601143000_01_detections.csv  # detecciones crudas
-│   ├── detections.csv                    # intervenciones (paths asignados)
+│   ├── detections.csv                    # intervenciones (paths asignados + patrón)
+│   ├── unmatched_paths.csv               # trayectorias sin flujo (si hay)
 │   ├── aggregated_counts.csv             # conteo agregado
 │   └── aggregated_chart.html             # gráfico interactivo
 ├── 2026-06-02\
 │   ├── cam3_20260602120000_03.mp4
 │   ├── cam3_20260602120000_03_detections.csv
 │   ├── detections.csv
+│   ├── unmatched_paths.csv
 │   ├── aggregated_counts.csv
 │   └── aggregated_chart.html
 └── progress.csv                          # control de reanudación
@@ -643,15 +922,17 @@ C:\output\cam3\
 
 ### 5. Ver resultados
 
-Abrir `aggregated_chart.html` en el navegador para ver los gráficos interactivos por flujo, o leer el CSV:
+Abrir `aggregated_chart.html` en el navegador para ver los gráficos interactivos por flujo, o leer el CSV. `aggregated_counts.csv` tiene tres filas de encabezado (acceso, flujo, tipo de vehículo) y una fila por intervalo:
 
 ```csv
-access,flow_name,vehicle_type,interval,count
-norte,Flujo Norte,car,06:00-06:15,12
-norte,Flujo Norte,truck,06:00-06:15,3
-norte,Flujo Norte,car,06:15-06:30,8
-sur,Flujo Sur,bus,06:00-06:15,2
+intervalo,norte,,,sur,,
+,Flujo Norte,,,Flujo Sur,,
+,car,truck,bicycle,car,bus,truck
+06:00-06:15,12,3,0,8,1,2
+06:15-06:30,9,1,1,6,0,1
 ```
+
+Para auditar por qué cada vehículo cayó en cada flujo, `detections.csv` trae la columna `patron`. Y `unmatched_paths.csv` muestra las secuencias que no matchearon, ordenadas por frecuencia: es el punto de partida para agregar `_`/`+` a la config.
 
 ### Resumen del pipeline de conteo
 
@@ -659,8 +940,8 @@ sur,Flujo Sur,bus,06:00-06:15,2
 detections.csv (crudas)
   → AbsoluteTimeConverter (tiempo absoluto + composite vehicle_id)
   → VehiclePathBuilder (trayectorias por vehículo)
-  → FlowMatcher (asignación a flujos definidos)
-  → InterventionFileExporter (detections.csv con paths)
+  → FlowMatcher (match completo con _ / + y precedencia por especificidad)
+  → InterventionFileExporter (detections.csv con patrón + unmatched_paths.csv)
   → IntervalGrouper (agregación por intervalos)
   → aggregated_counts.csv + aggregated_chart.{png|html}
 ```

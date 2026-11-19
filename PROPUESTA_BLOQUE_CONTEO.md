@@ -187,19 +187,24 @@ Cada servicio implementa un caso de uso **independiente y testeable**:
 - Recibe `list[VehiclePath]` y `list[CountGroupConfig]`
 - Para cada `VehiclePath`, determina si el path coincide con algún `zone_paths`
 - Comprueba que el `vehicle_type` esté en `include` y no en `exclude`
+- Match completo: el patrón debe cubrir toda la trayectoria. `_` matchea una zona y `+` una o más
+- Si varios patrones matchean, gana el más específico (más literales, menos `+`, más `_`) y el orden del YAML desempata
 - Asigna `flow_name` en cada `VehiclePath` (o `None` si no hay match)
 - Retorna `list[VehiclePath]` con `flow_name` poblado
 
 ### 4.4. `InterventionFileExporter`
 - Recibe `list[VehiclePath]` (cada uno con `flow_name` ya asignado por FlowMatcher)
-- Filtra los que sí hicieron match → `list[MatchedFlow]`
-- Genera archivo `detections.csv` en la carpeta procesada con las columnas:
+- Escribe `detections.csv` con todas las trayectorias (matcheadas y `UNKNOWN`)
+- Genera `unmatched_paths.csv` con las que no matchearon, agrupadas por secuencia y tipo (conteo y rango horario)
+- Retorna `list[MatchedFlow]` (solo las que matchearon) para el siguiente paso
+- Columnas de `detections.csv`:
   - `vehicle_id` — ID único prefijado
   - `vehicle_type` — tipo de vehículo
   - `zones` — lista de zonas que recorrió en orden temporal (`[A, B, C]`)
   - `hora_inicial` — hora absoluta del ingreso a la primera zona (`HH:MM:SS`)
   - `hora_final` — hora absoluta del ingreso a la última zona (`HH:MM:SS`)
   - `path_asignado` — nombre del flujo con el que matcheó, o `"UNKNOWN"` si no matcheó ninguno
+  - `patron` — patrón que matcheó (p.ej. `[A,+,D]`), vacío si no matcheó
 - Retorna `list[MatchedFlow]` para el siguiente paso
 
 ### 4.5. `IntervalGrouper`

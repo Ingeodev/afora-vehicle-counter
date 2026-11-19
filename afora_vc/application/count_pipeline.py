@@ -57,6 +57,10 @@ class GroupPipeline:
         self._intervention = InterventionFileExporter()
         self._interval_grouper = IntervalGrouper(config.interval_minutes)
 
+    @property
+    def flow_matcher(self) -> FlowMatcher:
+        return self._flow_matcher
+
     def execute(
         self,
         folder_path: str,
